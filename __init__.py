@@ -25,7 +25,7 @@ bl_info = {
     "warning": "",
     "category": "View Layers",
     "blender": (2,90,0),
-    "version": (1,0,35)
+    "version": (1,0,53)
 }
 
 # get addon name and version to use them automaticaly in the addon
@@ -50,11 +50,19 @@ class VLTOOLBOX_properties (bpy.types.PropertyGroup):
     ## outputs
     outputs_scenes_selection : bpy.props.EnumProperty (items = selection_options_prop,name = "Scenes ?",description = "choose selection type",default=1)
     outputs_alpha_solo : bpy.props.BoolProperty (default=False,name="Render Alpha separatly",description="if unchecked, the alpha will be embeded in the main image file")
-    outputs_reset : bpy.props.BoolProperty (default=False,name="Reset Output Nodes",description="if checked, all the outputs will be wiped before recreated (recommanded to avoid issues)")
-    outputs_clean_nodeslinks : bpy.props.BoolProperty (default=True,name="Clean Nodes Links",description="if checked, all the links between view layers and outputs will be reset")
+    output_reset_options = [("RESET ALL TREE","RESET ALL TREE","RESET ALL TREE",0),
+                                ("UPDATE OUTPUTS","UPDATE OUTPUTS","UPDATE OUTPUTS",1),
+                                ("ONLY UPDATE PATH","ONLY UPDATE PATH","ONLY UPDATE PATH",2),
+                                #("UNUSED NODES","UNUSED NODES","UNUSED NODES",2),
+                                #("NOTHING","NOTHING","NOTHING",3)
+                                ]
+    outputs_reset_selection : bpy.props.EnumProperty (items = output_reset_options,name = "",description = "Nodes reset",default=0)
+    #outputs_reset : bpy.props.BoolProperty (default=False,name="Reset Output Nodes",description="if checked, all the outputs will be wiped before recreated (recommanded to avoid issues)")
+    #outputs_clean_nodeslinks : bpy.props.BoolProperty (default=True,name="Clean Nodes Links",description="if checked, all the links between view layers and outputs will be reset")
+    #outputs_path_prop : bpy.props.BoolProperty (default=True,name="Update path",description="if checked, only the outputs path will be update ")
     outputs_usefilename : bpy.props.BoolProperty (default=True,name="Use scene filename",description="if checked, the filename will be use as a folder path")
-    outputs_sort_options = [('Ascending','Ascending','Ascending',0),
-                            ('Descending','Descending','Descending',1),
+    outputs_sort_options = [('Ascending','Ascending','Ascending',"SORT_ASC",0),
+                            ('Descending','Descending','Descending',"SORT_DESC",1),
                             ('Unsorted','Unsorted','Unsorted',2),
                             ]
     outputs_sort_prop : bpy.props.EnumProperty (items = outputs_sort_options,name = "Layers sort",description = "choose selection type",default=0)
@@ -90,17 +98,28 @@ class VIVLTOOLBOX_PT_filesoutput(bpy.types.Panel):
     def draw(self, context):
         viewLayerToolbox_props = context.scene.viewLayerToolbox_props
         layout = self.layout
-        row = layout.row()
-        row.operator("vltoolbox.createnodesoutput",text="Update Layers outputs",emboss=True,depress=False,icon="OUTPUT")
-        row.operator("vltoolbox.createprecomp",text="Create View Layers Pre-Comp Tree",emboss=True,depress=False,icon="NODE")
+        bigbox = layout.box()
+        split = bigbox.split(factor=.6)
+        box = split.box()
+        box.operator("vltoolbox.createnodesoutput",text="Update Layers outputs",emboss=True,depress=False,icon="OUTPUT")
+        #row = box.row()
+        box.operator("vltoolbox.createprecomp",text="Create View Layers Pre-Comp Tree",emboss=True,depress=False,icon="NODE")
+        #box.label(text="")
+        # node tree options
+        box = split.box()
+        row = box.row()
+        row.label(text="Updates:")
+        row = box.row()
+        row.prop(viewLayerToolbox_props, "outputs_reset_selection")
+        # row = box.row()
+        # row.prop(viewLayerToolbox_props, "outputs_reset")
+        # row = box.row()
+        # row.prop(viewLayerToolbox_props, "clear_unusedSockets_prop")
+        # misc options
         box = layout.box()
-        row = box.row()
-        row.prop(viewLayerToolbox_props, "outputs_reset")
-        row.prop(viewLayerToolbox_props, "clear_unusedSockets_prop")
-        row = box.row()
-        row.prop(viewLayerToolbox_props, "outputs_sort_prop")
-        row = box.row()
-        row.prop(viewLayerToolbox_props, "outputs_scenes_selection")
+        box.prop(viewLayerToolbox_props, "outputs_sort_prop")
+        #row = box.row()
+        box.prop(viewLayerToolbox_props, "outputs_scenes_selection")
 
 class VIVLTOOLBOX_PT_filesoutputoptions(bpy.types.Panel):
     bl_label = "Output Options"
@@ -219,6 +238,8 @@ def create_renderlayers_nodes(selected_scene,selected_scene_layer_list):
     ## variables
     selected_scene = selected_scene
     selected_scene_layer_list = selected_scene_layer_list
+    outputs_reset_selection = bpy.context.scene.viewLayerToolbox_props.outputs_reset_selection
+
     output_enabled_dict = {}
     
     bpy.data.scenes[selected_scene.name].use_nodes = True
@@ -297,6 +318,7 @@ def create_outputsNodes(selected_scene,selected_scene_layer_list,output_enabled_
     outputs_corresponding_prop = bpy.context.scene.viewLayerToolbox_props.outputs_corresponding_prop
     clear_unusedSockets_prop = bpy.context.scene.viewLayerToolbox_props.clear_unusedSockets_prop
     use_layerName_in_pass_prop = bpy.context.scene.viewLayerToolbox_props.use_layerName_in_pass_prop
+    outputs_reset_selection = bpy.context.scene.viewLayerToolbox_props.outputs_reset_selection
 
     outputs_corresponding_list = outputs_corresponding_prop.split(',')
     outputs_corresponding_dict = {}
@@ -324,41 +346,45 @@ def create_outputsNodes(selected_scene,selected_scene_layer_list,output_enabled_
         render_node_name = f"Render Layers - {layer.name}"
         output_node_name = f"File Output - {layer.name}"
         
-        # check if file output node exists
-        if output_node_name not in compo_tree.nodes:
-            # create file output
-            last_output_node = compo_tree.nodes.new(type="CompositorNodeOutputFile").name
-            compo_tree.nodes[last_output_node].name = output_node_name
-            new_output = True
+        if outputs_reset_selection!="ONLY UPDATE PATH":
+            # check if file output node exists
+            if output_node_name not in compo_tree.nodes:
+                # create file output
+                last_output_node = compo_tree.nodes.new(type="CompositorNodeOutputFile").name
+                compo_tree.nodes[last_output_node].name = output_node_name
+                new_output = True
+            else:
+                new_output = False
+            compo_tree.nodes[output_node_name].label = output_node_name
+            ## customise node regarding to render output
+            # move for more readability
+            if new_output:
+                compo_tree.nodes[output_node_name].location[0] = 400
+                compo_tree.nodes[output_node_name].width = (900)
+            compo_tree.nodes[output_node_name].location[1] = compo_tree.nodes[render_node_name].location[1] # always align output to render layer
+            compo_tree.nodes[output_node_name].use_custom_color = True
+            compo_tree.nodes[output_node_name].color = compo_tree.nodes[render_node_name].color # give the same color as render layer node
+            compo_tree.nodes[output_node_name].mute = compo_tree.nodes[render_node_name].mute # check if mute
+            compo_tree.nodes[output_node_name].format.file_format = selected_scene.render.image_settings.file_format
+            compo_tree.nodes[output_node_name].format.color_mode = selected_scene.render.image_settings.color_mode
+            compo_tree.nodes[output_node_name].format.color_depth = selected_scene.render.image_settings.color_depth
+            compo_tree.nodes[output_node_name].format.compression = selected_scene.render.image_settings.compression
         else:
             new_output = False
-        compo_tree.nodes[output_node_name].label = output_node_name
-        ## customise node regarding to render output
-        # move for more readability
-        if new_output:
-            compo_tree.nodes[output_node_name].location[0] = 400
-            compo_tree.nodes[output_node_name].width = (900)
-        compo_tree.nodes[output_node_name].location[1] = compo_tree.nodes[render_node_name].location[1] # always align output to render layer
-        compo_tree.nodes[output_node_name].use_custom_color = True
-        compo_tree.nodes[output_node_name].color = compo_tree.nodes[render_node_name].color # give the same color as render layer node
-        compo_tree.nodes[output_node_name].mute = compo_tree.nodes[render_node_name].mute # check if mute
         # update base path
         if layer_folder_prop:
             base_path = compo_tree.nodes[output_node_name].base_path = f"{main_file_output}\{layer.name}"
         else:
             base_path = compo_tree.nodes[output_node_name].base_path = f"{main_file_output}"
-        compo_tree.nodes[output_node_name].format.file_format = selected_scene.render.image_settings.file_format
-        compo_tree.nodes[output_node_name].format.color_mode = selected_scene.render.image_settings.color_mode
-        compo_tree.nodes[output_node_name].format.color_depth = selected_scene.render.image_settings.color_depth
-        compo_tree.nodes[output_node_name].format.compression = selected_scene.render.image_settings.compression
-
+        
+        # the view layer name will be added in each pass name
         if use_layerName_in_pass_prop:
             layername = layer.name
         else:
             layername = ""
-    
+
         ## create inputs in file outputs node regarding view layer
-        if new_output:
+        if new_output or outputs_reset_selection == "UPDATE OUTPUTS":
             compo_tree.nodes[output_node_name].inputs.clear()
             output_enabled_list = output_enabled_dict[render_node_name]
             for output in output_enabled_list:
@@ -414,8 +440,8 @@ class VLTOOLBOX_OT_createnodesoutput(bpy.types.Operator):
             for scene in bpy.data.scenes:
                 scene.viewLayerToolbox_props.outputs_scenes_selection = work_scene.viewLayerToolbox_props.outputs_scenes_selection
                 scene.viewLayerToolbox_props.outputs_alpha_solo = work_scene.viewLayerToolbox_props.outputs_alpha_solo
-                scene.viewLayerToolbox_props.outputs_reset = work_scene.viewLayerToolbox_props.outputs_reset
-                scene.viewLayerToolbox_props.outputs_clean_nodeslinks = work_scene.viewLayerToolbox_props.outputs_clean_nodeslinks
+                scene.viewLayerToolbox_props.outputs_reset_selection = work_scene.viewLayerToolbox_props.outputs_reset_selection
+                #scene.viewLayerToolbox_props.outputs_clean_nodeslinks = work_scene.viewLayerToolbox_props.outputs_clean_nodeslinks
                 scene.viewLayerToolbox_props.outputs_usefilename = work_scene.viewLayerToolbox_props.outputs_usefilename
                 scenes_list.append(scene)
         elif bpy.context.scene.viewLayerToolbox_props.outputs_scenes_selection == "CURRENT SCENE":
@@ -425,8 +451,9 @@ class VLTOOLBOX_OT_createnodesoutput(bpy.types.Operator):
         # process
         for scene in scenes_list:
             if precomp_scene_suffixe not in bpy.context.scene.name:
+                #if bpy.context.scene.use_nodes: # check if comp tree is on
                 #bpy.context.window.scene = scene # switch scene to well create render node (it depends of the current scene)
-                if scene.viewLayerToolbox_props.outputs_reset == True:
+                if scene.viewLayerToolbox_props.outputs_reset_selection == "RESET ALL TREE":
                     scene.node_tree.nodes.clear()
                 # list all render layers
                 selected_scene_layer_list = list_renderlayers(work_scene,sort_option)
@@ -462,7 +489,7 @@ class VLTOOLBOX_OT_createprecomp(bpy.types.Operator):
         elif bpy.context.scene.viewLayerToolbox_props.outputs_scenes_selection == "ALL SCENES WITH CURRENT SETTINGS":
             for scene in bpy.data.scenes:
                 scene.viewLayerToolbox_props.outputs_scenes_selection = work_scene.viewLayerToolbox_props.outputs_scenes_selection
-                scene.viewLayerToolbox_props.outputs_reset = work_scene.viewLayerToolbox_props.outputs_reset
+                scene.viewLayerToolbox_props.outputs_reset_selection = work_scene.viewLayerToolbox_props.outputs_reset_selection
                 scenes_list.append(scene)
         elif bpy.context.scene.viewLayerToolbox_props.outputs_scenes_selection == "CURRENT SCENE":
             scenes_list.append(work_scene)
@@ -475,7 +502,7 @@ class VLTOOLBOX_OT_createprecomp(bpy.types.Operator):
             node_tree = bpy.data.scenes[scene_name].node_tree
             if len(node_tree.nodes)==2: # in case of it's a new node tree, renderlayer + composite node are in
                 node_tree.nodes.clear()
-            if bpy.context.scene.viewLayerToolbox_props.outputs_reset == True:
+            if bpy.context.scene.viewLayerToolbox_props.outputs_reset_selection == "RESET ALL TREE":
                 node_tree.nodes.clear()
             # list all render layers
             selected_scene_layer_list = list_renderlayers(work_scene,sort_option)
