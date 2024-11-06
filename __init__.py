@@ -25,7 +25,7 @@ bl_info = {
     "warning": "",
     "category": "View Layers",
     "blender": (3,6,0),
-    "version": (1,1,49)
+    "version": (1,2,11)
 }
 
 # get addon name and version to use them automaticaly in the addon
@@ -85,7 +85,7 @@ class VLTOOLBOX_properties (bpy.types.PropertyGroup):
 # create panel UPPER_PT_lower
 # for view 3D
 class VIVLTOOLBOX_PT_filesoutput(bpy.types.Panel):
-    bl_label = f"MANAGE FILES OUTPUT - {Addon_Version}"
+    bl_label = f"MANAGE OUTPUT NODES - {Addon_Version}"
     bl_idname = "VIVLTOOLBOX_PT_filesoutput"
     bl_space_type = "PROPERTIES"
     bl_region_type = "WINDOW"
@@ -103,15 +103,13 @@ class VIVLTOOLBOX_PT_filesoutput(bpy.types.Panel):
         split = bigbox.split(factor=.6)
         box = split.box()
         box.operator("vltoolbox.createnodesoutput",text="Update Layers outputs",emboss=True,depress=False,icon="OUTPUT")
-        #row = box.row()
-        box.operator("vltoolbox.createprecomp",text="Create View Layers Pre-Comp Tree",emboss=True,depress=False,icon="NODE")
         #box.label(text="")
         # node tree options
         box = split.box()
         row = box.row()
-        row.label(text="Updates:")
-        row = box.row()
-        row.prop(VLToolbox_props, "outputs_reset_selection")
+        split = row.split(factor=.33)
+        split.label(text="Updates:")
+        split.prop(VLToolbox_props, "outputs_reset_selection")
         # options
         outputs_pathprevis = VLToolbox_props.vloutputs_path_previs.replace("**", "")
         box = layout.box()
@@ -125,8 +123,6 @@ class VIVLTOOLBOX_PT_filesoutput(bpy.types.Panel):
         else:
             str_check = "ok"
         row.label(text=f"length : {VLToolbox_props.vloutputs_pathlength_prop} on 64 ( {str_check} )")
-        
-        
 
 class VIVLTOOLBOX_PT_filesoutputfieldsoptions(bpy.types.Panel):
     bl_label = "Fields Options"
@@ -135,6 +131,11 @@ class VIVLTOOLBOX_PT_filesoutputfieldsoptions(bpy.types.Panel):
     bl_space_type = "PROPERTIES"
     bl_context = 'output'
     bl_parent_id = "VIVLTOOLBOX_PT_filesoutput"
+    bl_options = {"DEFAULT_CLOSED"}
+    
+    def draw_header(self, context):
+        layout = self.layout
+        layout.label(text="", icon='SMALL_CAPS')
 
     def draw(self, context):
         VLToolbox_props = context.scene.VLToolbox_props
@@ -202,7 +203,7 @@ class VIVLTOOLBOX_PT_filesoutputoptions(bpy.types.Panel):
     
     def draw_header(self, context):
         layout = self.layout
-        layout.label(text="", icon='OPTIONS')
+        layout.label(text="", icon='OUTPUT')
 
     def draw(self, context):
         VLToolbox_props = context.scene.VLToolbox_props
@@ -210,28 +211,45 @@ class VIVLTOOLBOX_PT_filesoutputoptions(bpy.types.Panel):
         layout = self.layout
         # misc options
         box = layout.box()
-        box.prop(VLToolbox_props, "outputs_sort_prop")
-        #row = box.row()
-        box.prop(VLToolbox_props, "outputs_scenes_selection")
-        box = layout.box()
         row = box.row()
-        row.prop(VLToolbox_props, "layer_folder_prop")
-        row.prop(VLToolbox_props, "outputs_folder_prop")
+        row.prop(VLToolbox_props, "outputs_sort_prop")
+        row.prop(VLToolbox_props, "outputs_scenes_selection")
         row = box.row()
         row.prop(VLToolbox_props, "outputs_alpha_solo")
-        
+
+class VIVLTOOLBOX_PT_precomptree(bpy.types.Panel):
+    bl_label = f"CREATE PRECOMP TREE - {Addon_Version}"
+    bl_idname = "VIVLTOOLBOX_PT_precomptree"
+    bl_space_type = "PROPERTIES"
+    bl_region_type = "WINDOW"
+    bl_context = 'output'
+    #bl_parent_id = "RENDER_PT_output"
+    
+    def draw_header(self, context):
+        layout = self.layout
+        layout.label(text="", icon='NODETREE')
+
+    def draw(self, context):
+        VLToolbox_props = context.scene.VLToolbox_props
+        layout = self.layout
+        bigbox = layout.box()
+        split = bigbox.split(factor=.6)
+        box = split.box()
+        #row = box.row()
+        box.operator("vltoolbox.createprecomp",text="Create View Layers Pre-Comp Tree",emboss=True,depress=False,icon="NODE")
+
 class VIVLTOOLBOX_PT_precompoptions(bpy.types.Panel):
     bl_label = "Precomp Options"
     bl_idname = "VIVLTOOLBOX_PT_precompoptions"
     bl_space_type = "PROPERTIES"
     bl_region_type = "WINDOW"
     bl_context = 'output'
-    bl_parent_id = "VIVLTOOLBOX_PT_filesoutput"
+    bl_parent_id = "VIVLTOOLBOX_PT_precomptree"
     bl_options = {"DEFAULT_CLOSED"}
 
     def draw_header(self, context):
         layout = self.layout
-        layout.label(text="", icon='OPTIONS')
+        layout.label(text="", icon='NODE')
 
     def draw(self, context):
         col = self.layout.column()
@@ -280,9 +298,13 @@ def list_renderlayers_nodes(selected_scene,sort_option):
 
     renderLayer_nodes_list = []
     for node in node_tree.nodes:
-        if node.type == "R_LAYERS" and node.mute == False:
-            renderLayer_nodes_list.append(node)
-    #print(f"{renderLayer_nodes_list=}")
+        if node.type == "R_LAYERS" :
+            check_name = node.name.replace("Render Layers - ","")
+            if check_name not in bpy.context.scene.view_layers.keys(): # check if the layer is still in the scene 
+                node.mute = True
+            if node.mute == False:
+                renderLayer_nodes_list.append(node)
+    print(f"{renderLayer_nodes_list=}")
     # sort render layers regarding name
     renderLayer_nodes_names_list = []
     for node in renderLayer_nodes_list:
@@ -626,10 +648,10 @@ class VLTOOLBOX_OT_createprecomp(bpy.types.Operator):
             scene_name = scene.name
             bpy.data.scenes[scene_name].use_nodes = True
             node_tree = bpy.data.scenes[scene_name].node_tree
-            if len(node_tree.nodes)==2: # in case of it's a new node tree, renderlayer + composite node are in
-                node_tree.nodes.clear()
-            if bpy.context.scene.VLToolbox_props.outputs_reset_selection == "RESET ALL TREE":
-                node_tree.nodes.clear()
+            # if len(node_tree.nodes)==2 : # in case of it's a new node tree, renderlayer + composite node are in
+            #     node_tree.nodes.clear()
+            # if bpy.context.scene.VLToolbox_props.outputs_reset_selection == "RESET ALL TREE":
+            #     node_tree.nodes.clear()
             # list all render layers
             selected_scene_layer_list = list_renderlayers(work_scene,sort_option)
             # create render layers
@@ -638,10 +660,14 @@ class VLTOOLBOX_OT_createprecomp(bpy.types.Operator):
             
             ## create clean list (by alphabatical order) of render layer nodes
             renderLayer_nodes_list = list_renderlayers_nodes(scene,sort_option)
-            print(f"{renderLayer_nodes_list=}")
+            #print(f"{renderLayer_nodes_list=}")
 
             ### create alpha over node tree
             name_suffix = "_automatic"
+            ## clean old alpha over nodes
+            for node in node_tree.nodes:
+                if node.name.endswith(name_suffix):
+                    node_tree.nodes.remove(node_tree.nodes[node.name])
             iter = 0
             location_x = 2000
             location_x_add = 300
@@ -744,6 +770,7 @@ classes = (
     VIVLTOOLBOX_PT_filesoutput,
     VIVLTOOLBOX_PT_filesoutputfieldsoptions,
     VIVLTOOLBOX_PT_filesoutputoptions,
+    VIVLTOOLBOX_PT_precomptree,
     VIVLTOOLBOX_PT_precompoptions,
     VLTOOLBOX_OT_createnodesoutput,
     VLTOOLBOX_OT_dellastcharacter,
