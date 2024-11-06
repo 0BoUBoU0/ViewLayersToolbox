@@ -24,8 +24,8 @@ bl_info = {
     "doc_url": "",
     "warning": "",
     "category": "View Layers",
-    "blender": (2,90,0),
-    "version": (1,0,53)
+    "blender": (3,6,0),
+    "version": (1,1,49)
 }
 
 # get addon name and version to use them automaticaly in the addon
@@ -34,7 +34,7 @@ Addon_Version = str(bl_info["version"]).replace(",",".").replace("(","").replace
 
 ### import modules ###
 import bpy
-import random
+from random import uniform
 
 ### define global variables ###
 debug_mode = False
@@ -51,16 +51,12 @@ class VLTOOLBOX_properties (bpy.types.PropertyGroup):
     outputs_scenes_selection : bpy.props.EnumProperty (items = selection_options_prop,name = "Scenes ?",description = "choose selection type",default=1)
     outputs_alpha_solo : bpy.props.BoolProperty (default=False,name="Render Alpha separatly",description="if unchecked, the alpha will be embeded in the main image file")
     output_reset_options = [("RESET ALL TREE","RESET ALL TREE","RESET ALL TREE",0),
-                                ("UPDATE OUTPUTS","UPDATE OUTPUTS","UPDATE OUTPUTS",1),
-                                ("ONLY UPDATE PATH","ONLY UPDATE PATH","ONLY UPDATE PATH",2),
+                                ("UPDATE OUTPUTS LINKS","UPDATE OUTPUTS LINKS","Will update output links, meaning recreating links between nodes",1),
+                                ("ONLY UPDATE PATHS","ONLY UPDATE PATHS","will update all outputs nodes paths",2),
                                 #("UNUSED NODES","UNUSED NODES","UNUSED NODES",2),
                                 #("NOTHING","NOTHING","NOTHING",3)
                                 ]
     outputs_reset_selection : bpy.props.EnumProperty (items = output_reset_options,name = "",description = "Nodes reset",default=0)
-    #outputs_reset : bpy.props.BoolProperty (default=False,name="Reset Output Nodes",description="if checked, all the outputs will be wiped before recreated (recommanded to avoid issues)")
-    #outputs_clean_nodeslinks : bpy.props.BoolProperty (default=True,name="Clean Nodes Links",description="if checked, all the links between view layers and outputs will be reset")
-    #outputs_path_prop : bpy.props.BoolProperty (default=True,name="Update path",description="if checked, only the outputs path will be update ")
-    outputs_usefilename : bpy.props.BoolProperty (default=True,name="Use scene filename",description="if checked, the filename will be use as a folder path")
     outputs_sort_options = [('Ascending','Ascending','Ascending',"SORT_ASC",0),
                             ('Descending','Descending','Descending',"SORT_DESC",1),
                             ('Unsorted','Unsorted','Unsorted',2),
@@ -68,17 +64,22 @@ class VLTOOLBOX_properties (bpy.types.PropertyGroup):
     outputs_sort_prop : bpy.props.EnumProperty (items = outputs_sort_options,name = "Layers sort",description = "choose selection type",default=0)
     outputs_prefix_prop : bpy.props.StringProperty(name="Pass Prefix",default="",description="")
     layer_folder_prop : bpy.props.BoolProperty (default=True,name="One folder per layer",description="if checked, images sequences of each layer will be stored in a different folder")
-    outputs_folder_prop : bpy.props.BoolProperty (default=False,name="One folder per output",description="if checked, images sequences of each passes will be stored in folders")
-    output_separator_options = [("None","None","None",0),("_","_","_",1),("-","-","-",2),(".",".",".",3)]
-    output_filename_end_prop : bpy.props.EnumProperty (items = output_separator_options,name = "Filename end",description = 'symbol to separate the name from the frame number.\n i.e: separator = "." gives "filename.0000", separator = "None" gives "filename0000" ' ,default=3)
-    outputs_corresponding_prop : bpy.props.StringProperty(name="Translation",default="Image=rgba",description='translate field a to field b, separated by ",". I.E. "Image=rgba,Alpha=alpha"')
+    outputs_folder_prop : bpy.props.BoolProperty (default=False,name="One folder per output",description="if checked, images sequences of each passes will be stored in folders")    
+    vloutputs_corresponding_prop : bpy.props.StringProperty(name="Translation",default="Image=rgba",description='translate field a to field b, separated by ",". I.E. "Image=rgba,Alpha=alpha"')
     clear_unusedSockets_prop : bpy.props.BoolProperty (default=False,name="Clear Unused Output",description="if checked, clear user unused outputs")
     use_layerName_in_pass_prop : bpy.props.BoolProperty (default=False,name="Use Layer Name",description="if checked, the view layer name will be added in each pass name")
+
+    vloutputs_path_previs: bpy.props.StringProperty(default="[Layer Name]**\\[Pass Name]**\\", name="Output previs", description='output path')
+    vloutputs_customfield_a_prop: bpy.props.StringProperty(default="", name="", description='First user custom field (A)')
+    vloutputs_customfield_b_prop: bpy.props.StringProperty(default="", name="", description='Second user custom field (B)')
+    vloutputs_customfield_c_prop: bpy.props.StringProperty(default="", name="", description='Third user custom field (C)')
+    vloutputs_pathlength_prop : bpy.props.IntProperty(default=0, name="", description='')
 
     ## precomp
     precomp_bg_under_prop : bpy.props.BoolProperty(default=False,name="",description="")
     precomp_bg_img_prop : bpy.props.PointerProperty(type=bpy.types.Image, name="BG under", description="")
     precomp_freestyle_prop : bpy.props.BoolProperty (default=True,name="Freestyle Over",description="if freestyle on separate pass, freestyle over")
+    
     
 ### create panels ###
 # create panel UPPER_PT_lower
@@ -96,7 +97,7 @@ class VIVLTOOLBOX_PT_filesoutput(bpy.types.Panel):
         layout.label(text="", icon='NODETREE')
 
     def draw(self, context):
-        viewLayerToolbox_props = context.scene.viewLayerToolbox_props
+        VLToolbox_props = context.scene.VLToolbox_props
         layout = self.layout
         bigbox = layout.box()
         split = bigbox.split(factor=.6)
@@ -110,16 +111,85 @@ class VIVLTOOLBOX_PT_filesoutput(bpy.types.Panel):
         row = box.row()
         row.label(text="Updates:")
         row = box.row()
-        row.prop(viewLayerToolbox_props, "outputs_reset_selection")
-        # row = box.row()
-        # row.prop(viewLayerToolbox_props, "outputs_reset")
-        # row = box.row()
-        # row.prop(viewLayerToolbox_props, "clear_unusedSockets_prop")
-        # misc options
+        row.prop(VLToolbox_props, "outputs_reset_selection")
+        # options
+        outputs_pathprevis = VLToolbox_props.vloutputs_path_previs.replace("**", "")
         box = layout.box()
-        box.prop(viewLayerToolbox_props, "outputs_sort_prop")
-        #row = box.row()
-        box.prop(viewLayerToolbox_props, "outputs_scenes_selection")
+        row = box.row()
+        split = row.split(align=True, factor=0.9)
+        split.label(text=f"Path: {outputs_pathprevis}")
+        split.operator('vltoolbox.dellastcharacter', text="", icon="TRIA_LEFT_BAR")
+        row = box.row()
+        if VLToolbox_props.vloutputs_pathlength_prop>=64:
+            str_check = "too long !!"
+        else:
+            str_check = "ok"
+        row.label(text=f"length : {VLToolbox_props.vloutputs_pathlength_prop} on 64 ( {str_check} )")
+        
+        
+
+class VIVLTOOLBOX_PT_filesoutputfieldsoptions(bpy.types.Panel):
+    bl_label = "Fields Options"
+    bl_idname = "VIVLTOOLBOX_PT_filesoutputfieldsoptions"
+    bl_region_type = "WINDOW"
+    bl_space_type = "PROPERTIES"
+    bl_context = 'output'
+    bl_parent_id = "VIVLTOOLBOX_PT_filesoutput"
+
+    def draw(self, context):
+        VLToolbox_props = context.scene.VLToolbox_props
+        layout = self.layout
+        box = layout.box()
+        # text blocs
+        def ui_blocs(list):
+            iter = 0
+            for char, label,icon in list:
+                row.operator('vltoolbox.add_character_enum', text=label, icon=icon).character = char
+                iter += 1
+        # main options
+        row = box.row()
+        char_options_A = [
+            ("[Pass Name]", "Pass Name","IMAGE_PLANE"),
+            ("[Layer Name]", "Layer Name","RENDERLAYERS"),
+            ("[Scene Name]", "Scene Name","SCENE_DATA"),
+            ("[File Name]", "File Name","FILE"),
+            ("[Camera Name]", "Camera Name","CAMERA_DATA"),
+            ("[File Version]", "File Version","LINENUMBERS_ON")
+        ]
+        ui_blocs(char_options_A)
+        # separators
+        row = box.row()
+        char_options_B = [
+            ("\\", "Backlash \\","NONE"),
+            ("_", "Underscore _","NONE"),
+            ("-", "Dash -","NONE"),
+            (".", "Dot .","NONE"),
+        ]
+        ui_blocs(char_options_B)
+        # customs
+        row = box.row()
+        char_options_C = [
+            ("[Custom A]", "Custom A","NONE"),
+            ("[Custom B]", "Custom B","NONE"),
+            ("[Custom C]", "Custom C","NONE"),
+        ]
+        ui_blocs(char_options_C)
+        box = layout.box()
+        row = box.row()
+        col = row.column()
+        split = col.split(factor=2/5)
+        split.label(text="A Custom")
+        split.prop(context.scene.VLToolbox_props, "vloutputs_customfield_a_prop")
+        col = row.column()
+        split = col.split(factor=2/5)
+        split.label(text="B Custom")
+        split.prop(context.scene.VLToolbox_props, "vloutputs_customfield_b_prop")
+        col = row.column()
+        split = col.split(factor=2/5)
+        split.label(text="C Custom")
+        split.prop(context.scene.VLToolbox_props, "vloutputs_customfield_c_prop")
+        row = box.row()
+        row.prop(VLToolbox_props, "vloutputs_corresponding_prop")
 
 class VIVLTOOLBOX_PT_filesoutputoptions(bpy.types.Panel):
     bl_label = "Output Options"
@@ -135,26 +205,21 @@ class VIVLTOOLBOX_PT_filesoutputoptions(bpy.types.Panel):
         layout.label(text="", icon='OPTIONS')
 
     def draw(self, context):
-        viewLayerToolbox_props = context.scene.viewLayerToolbox_props
+        VLToolbox_props = context.scene.VLToolbox_props
 
         layout = self.layout
+        # misc options
+        box = layout.box()
+        box.prop(VLToolbox_props, "outputs_sort_prop")
+        #row = box.row()
+        box.prop(VLToolbox_props, "outputs_scenes_selection")
         box = layout.box()
         row = box.row()
-        row.prop(viewLayerToolbox_props, "outputs_usefilename")
-        row.prop(viewLayerToolbox_props, "output_filename_end_prop")
+        row.prop(VLToolbox_props, "layer_folder_prop")
+        row.prop(VLToolbox_props, "outputs_folder_prop")
         row = box.row()
-        row.prop(viewLayerToolbox_props, "outputs_prefix_prop")
-        row = box.row()
-        row.prop(viewLayerToolbox_props, "layer_folder_prop")
-        row.prop(viewLayerToolbox_props, "outputs_folder_prop")
-        row = box.row()
-        row.prop(viewLayerToolbox_props, "outputs_alpha_solo")
-        row.prop(viewLayerToolbox_props, "use_layerName_in_pass_prop")
-        box = layout.box()
-        row = box.row()
-        row.prop(viewLayerToolbox_props, "outputs_corresponding_prop")
+        row.prop(VLToolbox_props, "outputs_alpha_solo")
         
-
 class VIVLTOOLBOX_PT_precompoptions(bpy.types.Panel):
     bl_label = "Precomp Options"
     bl_idname = "VIVLTOOLBOX_PT_precompoptions"
@@ -171,16 +236,16 @@ class VIVLTOOLBOX_PT_precompoptions(bpy.types.Panel):
     def draw(self, context):
         col = self.layout.column()
         row = col.row()
-        viewLayerToolbox_props = context.scene.viewLayerToolbox_props
+        VLToolbox_props = context.scene.VLToolbox_props
         row = col.row()
         split = row.split(factor = .1)
-        split.prop(viewLayerToolbox_props, "precomp_bg_under_prop")
-        split.active = viewLayerToolbox_props.precomp_bg_under_prop
-        split.prop(viewLayerToolbox_props, "precomp_bg_img_prop")
+        split.prop(VLToolbox_props, "precomp_bg_under_prop")
+        split.active = VLToolbox_props.precomp_bg_under_prop
+        split.prop(VLToolbox_props, "precomp_bg_img_prop")
         row = col.row()
-        row.prop(viewLayerToolbox_props, "precomp_freestyle_prop")
+        row.prop(VLToolbox_props, "precomp_freestyle_prop")
         #
-        #row.prop(viewLayerToolbox_props, "precomp_input_prop")
+        #row.prop(VLToolbox_props, "precomp_input_prop")
         
 
 ### create functions ###
@@ -238,7 +303,7 @@ def create_renderlayers_nodes(selected_scene,selected_scene_layer_list):
     ## variables
     selected_scene = selected_scene
     selected_scene_layer_list = selected_scene_layer_list
-    outputs_reset_selection = bpy.context.scene.viewLayerToolbox_props.outputs_reset_selection
+    outputs_reset_selection = bpy.context.scene.VLToolbox_props.outputs_reset_selection
 
     output_enabled_dict = {}
     
@@ -251,7 +316,7 @@ def create_renderlayers_nodes(selected_scene,selected_scene_layer_list):
         ## generate variables
         render_node_name = f"Render Layers - {layer.name}"
         #print(f"{render_node_name=}")
-        node_color = (random.uniform(0,1), random.uniform(0,1), random.uniform(0,1))
+        node_color = (uniform(0,1), uniform(0,1), uniform(0,1))
         x_coord = 0
 
         ## create layer node if needed
@@ -303,6 +368,42 @@ def create_renderlayers_nodes(selected_scene,selected_scene_layer_list):
     #print(f"{output_enabled_dict}")
     return output_enabled_dict
 
+# function to grab all informations given by the user regarding the name of the layers
+def vloutputs_nodes_paths(layername,outputname):
+    scene = bpy.context.scene
+    vloutput_path = scene.VLToolbox_props.vloutputs_path_previs
+    output_split = vloutput_path.split("**")
+    vloutput_filepath = ""
+    for elem in output_split:
+        if elem == "[Pass Name]":
+            elem = outputname
+        elif elem == "[Layer Name]":
+            elem = layername
+        elif elem == "[File Name]":
+            elem = bpy.data.filepath.split("\\")[-1].split(".")[0]
+        elif elem == "[Scene Name]":
+            elem = scene.name
+        elif elem == "[Camera Name]":
+            elem = scene.camera.name if scene.camera else ""
+        elif elem == "[Custom A]":
+            elem = scene.VLToolbox_props.vloutputs_customfield_a_prop
+        elif elem == "[Custom B]":
+            elem = scene.VLToolbox_props.vloutputs_customfield_b_prop
+        elif elem == "[Custom C]":
+            elem = scene.VLToolbox_props.vloutputs_customfield_c_prop
+        elif elem == "[File Version]":
+            if 'Snapshots_History' in bpy.data.texts.keys():
+                snap_history = bpy.data.texts['Snapshots_History'].lines[0].body
+                file_version = snap_history.replace("--", "").split(":")[-1].strip()
+            else:
+                file_version = "v001"
+            elem = file_version
+        
+        vloutput_filepath += elem # create the complete path
+        clean_filepath = vloutput_filepath.replace("\\\\", "\\").replace("\\//", "\\").replace("////", "//") # clean to avoid dirty things
+    scene.VLToolbox_props.vloutputs_pathlength_prop = len(clean_filepath)
+    return clean_filepath
+
 def create_outputsNodes(selected_scene,selected_scene_layer_list,output_enabled_dict):
     ## variables
     selected_scene = selected_scene
@@ -311,16 +412,12 @@ def create_outputsNodes(selected_scene,selected_scene_layer_list,output_enabled_
     
     bpy.data.scenes[selected_scene.name].use_nodes = True
     compo_tree = bpy.data.scenes[selected_scene.name].node_tree
-    outputs_folder_prop = bpy.context.scene.viewLayerToolbox_props.outputs_folder_prop
-    layer_folder_prop = bpy.context.scene.viewLayerToolbox_props.layer_folder_prop
-    outputs_prefix_prop = bpy.context.scene.viewLayerToolbox_props.outputs_prefix_prop
-    output_filename_end_prop = bpy.context.scene.viewLayerToolbox_props.output_filename_end_prop
-    outputs_corresponding_prop = bpy.context.scene.viewLayerToolbox_props.outputs_corresponding_prop
-    clear_unusedSockets_prop = bpy.context.scene.viewLayerToolbox_props.clear_unusedSockets_prop
-    use_layerName_in_pass_prop = bpy.context.scene.viewLayerToolbox_props.use_layerName_in_pass_prop
-    outputs_reset_selection = bpy.context.scene.viewLayerToolbox_props.outputs_reset_selection
+    vloutputs_corresponding_prop = bpy.context.scene.VLToolbox_props.vloutputs_corresponding_prop
+    clear_unusedSockets_prop = bpy.context.scene.VLToolbox_props.clear_unusedSockets_prop
+    outputs_reset_selection = bpy.context.scene.VLToolbox_props.outputs_reset_selection
 
-    outputs_corresponding_list = outputs_corresponding_prop.split(',')
+    # change names regarding the translation dic (Image=rgba, etc)
+    outputs_corresponding_list = vloutputs_corresponding_prop.split(',')
     outputs_corresponding_dict = {}
     for corres in outputs_corresponding_list:
         corres = corres.replace(" ","")
@@ -330,14 +427,13 @@ def create_outputsNodes(selected_scene,selected_scene_layer_list,output_enabled_
     # remove main output namefile to keep only filepath : 
     main_file_output = selected_scene.render.filepath
     possible_separator = ["\\"]
-    if bpy.context.scene.viewLayerToolbox_props.outputs_usefilename == False:
-        for separator in possible_separator:
-            if separator in main_file_output:
-                main_file_output = main_file_output.split(separator)
-                file_name = main_file_output[-1]
-                main_file_output.remove(file_name)
-                main_file_output = separator.join(main_file_output)
-                main_file_output = f"{main_file_output}{separator}"
+    for separator in possible_separator:
+        if separator in main_file_output:
+            main_file_output = main_file_output.split(separator)
+            file_name = main_file_output[-1]
+            main_file_output.remove(file_name)
+            main_file_output = separator.join(main_file_output)
+            main_file_output = f"{main_file_output}{separator}"
 
     ## create outputs nodes
     iter_node = 0
@@ -346,7 +442,8 @@ def create_outputsNodes(selected_scene,selected_scene_layer_list,output_enabled_
         render_node_name = f"Render Layers - {layer.name}"
         output_node_name = f"File Output - {layer.name}"
         
-        if outputs_reset_selection!="ONLY UPDATE PATH":
+        # create output nodes if needed
+        if outputs_reset_selection!="ONLY UPDATE PATHS":
             # check if file output node exists
             if output_node_name not in compo_tree.nodes:
                 # create file output
@@ -371,41 +468,47 @@ def create_outputsNodes(selected_scene,selected_scene_layer_list,output_enabled_
             compo_tree.nodes[output_node_name].format.compression = selected_scene.render.image_settings.compression
         else:
             new_output = False
-        # update base path
-        if layer_folder_prop:
-            base_path = compo_tree.nodes[output_node_name].base_path = f"{main_file_output}\{layer.name}"
-        else:
-            base_path = compo_tree.nodes[output_node_name].base_path = f"{main_file_output}"
-        
-        # the view layer name will be added in each pass name
-        if use_layerName_in_pass_prop:
-            layername = layer.name
-        else:
-            layername = ""
 
+        #print(f"{new_output=}")
+
+        # update output node path (different from output names !)
+        compo_tree.nodes[output_node_name].base_path = f"{main_file_output}"
+
+        output_enabled_list = output_enabled_dict[render_node_name]
+        f"{output_enabled_list=}"
         ## create inputs in file outputs node regarding view layer
-        if new_output or outputs_reset_selection == "UPDATE OUTPUTS":
+        if new_output or outputs_reset_selection == "UPDATE OUTPUTS LINKS":
             compo_tree.nodes[output_node_name].inputs.clear()
-            output_enabled_list = output_enabled_dict[render_node_name]
             for output in output_enabled_list:
-                    output_slot = output
-                    if output in outputs_corresponding_dict.keys():
-                        output = outputs_corresponding_dict[output]
-                    if layer_folder_prop:
-                        pass_name = f"{output}"
-                    else:
-                        pass_name = f"{layer.name}_{output}" 
-                    # if output == "Image":
-                    #     pass_name = f"rgba"
-                    # else:
-                    #     pass_name = f"{output}"
-                    if outputs_folder_prop:
-                        input_slot = f"{outputs_prefix_prop}{layername}_{pass_name}\\{outputs_prefix_prop}{pass_name}{output_filename_end_prop}"
-                    else:
-                        input_slot = f"{outputs_prefix_prop}{layername}_{pass_name}{output_filename_end_prop}"
-                    compo_tree.nodes[output_node_name].layer_slots.new(input_slot) # "." is for better readability in files
-                    if bpy.context.scene.viewLayerToolbox_props.outputs_alpha_solo == True or bpy.context.scene.viewLayerToolbox_props.outputs_alpha_solo == False and output != "Alpha":
-                        compo_tree.links.new(compo_tree.nodes[render_node_name].outputs[output_slot],compo_tree.nodes[output_node_name].inputs[input_slot])
+                output_slot = output
+                # check if user wants to change the name
+                if output in outputs_corresponding_dict.keys():
+                    output = outputs_corresponding_dict[output]
+                # create the outputs paths regarding user fields
+                vloutput_path = vloutputs_nodes_paths(layer.name,output)
+
+                #input_slot = f"{outputs_prefix_prop}{layername}_{pass_name}{output_filename_end_prop}"
+                input_slot = vloutput_path
+                #print(f"{input_slot=}")
+                #print(f"{output_slot=}")
+                compo_tree.nodes[output_node_name].layer_slots.new(input_slot) # "." is for better readability in files
+                if bpy.context.scene.VLToolbox_props.outputs_alpha_solo == True or bpy.context.scene.VLToolbox_props.outputs_alpha_solo == False and output != "Alpha":
+                    compo_tree.links.new(compo_tree.nodes[render_node_name].outputs[output_slot],compo_tree.nodes[output_node_name].inputs[input_slot])
+        
+        # update outputs slots names
+        if outputs_reset_selection=="ONLY UPDATE PATHS":
+            iter = 0
+            for input_slot in output_enabled_list:
+                # check if user wants to change the name
+                if input_slot in outputs_corresponding_dict.keys():
+                    input_slot = outputs_corresponding_dict[input_slot]
+                # create the outputs paths regarding user fields
+                vloutput_path = vloutputs_nodes_paths(layer.name,input_slot)
+                if bpy.context.scene.VLToolbox_props.outputs_alpha_solo == False and input_slot != "Alpha":
+                    compo_tree.nodes[output_node_name].file_slots[iter].path = vloutput_path
+                    iter += 1
+                elif input_slot == "Alpha":
+                    iter += 1
 
         # clean unused output
         if clear_unusedSockets_prop:
@@ -426,25 +529,24 @@ class VLTOOLBOX_OT_createnodesoutput(bpy.types.Operator):
     def execute(self, context):
         print(f"\n {separator} Begin {Addon_Name} {separator} \n")
 
-        sort_option = bpy.context.scene.viewLayerToolbox_props.outputs_sort_prop
+        sort_option = bpy.context.scene.VLToolbox_props.outputs_sort_prop
 
         # make it for all scenes or only current
         work_scene = bpy.context.scene
 
         # create scene list to process
         scenes_list = []
-        if bpy.context.scene.viewLayerToolbox_props.outputs_scenes_selection == "ALL SCENES":
+        if bpy.context.scene.VLToolbox_props.outputs_scenes_selection == "ALL SCENES":
             for scene in bpy.data.scenes:
                 scenes_list.append(scene)
-        elif bpy.context.scene.viewLayerToolbox_props.outputs_scenes_selection == "ALL SCENES WITH CURRENT SETTINGS":
+        elif bpy.context.scene.VLToolbox_props.outputs_scenes_selection == "ALL SCENES WITH CURRENT SETTINGS":
             for scene in bpy.data.scenes:
-                scene.viewLayerToolbox_props.outputs_scenes_selection = work_scene.viewLayerToolbox_props.outputs_scenes_selection
-                scene.viewLayerToolbox_props.outputs_alpha_solo = work_scene.viewLayerToolbox_props.outputs_alpha_solo
-                scene.viewLayerToolbox_props.outputs_reset_selection = work_scene.viewLayerToolbox_props.outputs_reset_selection
-                #scene.viewLayerToolbox_props.outputs_clean_nodeslinks = work_scene.viewLayerToolbox_props.outputs_clean_nodeslinks
-                scene.viewLayerToolbox_props.outputs_usefilename = work_scene.viewLayerToolbox_props.outputs_usefilename
+                scene.VLToolbox_props.outputs_scenes_selection = work_scene.VLToolbox_props.outputs_scenes_selection
+                scene.VLToolbox_props.outputs_alpha_solo = work_scene.VLToolbox_props.outputs_alpha_solo
+                scene.VLToolbox_props.outputs_reset_selection = work_scene.VLToolbox_props.outputs_reset_selection
+                #scene.VLToolbox_props.outputs_clean_nodeslinks = work_scene.VLToolbox_props.outputs_clean_nodeslinks
                 scenes_list.append(scene)
-        elif bpy.context.scene.viewLayerToolbox_props.outputs_scenes_selection == "CURRENT SCENE":
+        elif bpy.context.scene.VLToolbox_props.outputs_scenes_selection == "CURRENT SCENE":
             scenes_list.append(work_scene)
         
         #print(f"{scenes_list=}")
@@ -453,7 +555,7 @@ class VLTOOLBOX_OT_createnodesoutput(bpy.types.Operator):
             if precomp_scene_suffixe not in bpy.context.scene.name:
                 #if bpy.context.scene.use_nodes: # check if comp tree is on
                 #bpy.context.window.scene = scene # switch scene to well create render node (it depends of the current scene)
-                if scene.viewLayerToolbox_props.outputs_reset_selection == "RESET ALL TREE":
+                if scene.VLToolbox_props.outputs_reset_selection == "RESET ALL TREE":
                     scene.node_tree.nodes.clear()
                 # list all render layers
                 selected_scene_layer_list = list_renderlayers(work_scene,sort_option)
@@ -466,6 +568,30 @@ class VLTOOLBOX_OT_createnodesoutput(bpy.types.Operator):
 
         return {"FINISHED"}
 
+class VLTOOLBOX_OT_dellastcharacter(bpy.types.Operator):
+    bl_idname = 'vltoolbox.dellastcharacter'
+    bl_label = "Delete Last Character"
+    bl_options = {"REGISTER", "UNDO"}
+    
+    def execute(self, context):
+        vloutputs_path_previs = context.scene.VLToolbox_props.vloutputs_path_previs
+        output_split = vloutputs_path_previs.split("**")
+        context.scene.VLToolbox_props.vloutputs_path_previs = "**".join(output_split[:-1])
+        return {"FINISHED"}
+
+# Generic operator for adding characters
+class VLTOOLBOX_OT_add_character_enum(bpy.types.Operator):
+    bl_idname = 'vltoolbox.add_character_enum'
+    bl_label = "Add Character"
+    bl_description = "Adds a character or field to the path"
+    bl_options = {"REGISTER", "UNDO"}
+
+    character: bpy.props.StringProperty()
+
+    def execute(self, context):
+        context.scene.VLToolbox_props.vloutputs_path_previs += f"**{self.character}"
+        return {"FINISHED"}
+
 class VLTOOLBOX_OT_createprecomp(bpy.types.Operator):
     bl_idname = "vltoolbox.createprecomp"
     bl_label = Addon_Name + "Create Pre-Comp Tree scene"
@@ -476,22 +602,22 @@ class VLTOOLBOX_OT_createprecomp(bpy.types.Operator):
         print(f"\n {separator} Begin {Addon_Name} {separator} \n")
         
         work_scene = bpy.context.scene
-        sort_option = work_scene.viewLayerToolbox_props.outputs_sort_prop
-        precomp_bg_under_prop = work_scene.viewLayerToolbox_props.precomp_bg_under_prop
-        precomp_bg_img_prop = work_scene.viewLayerToolbox_props.precomp_bg_img_prop
-        precomp_freestyle_prop = work_scene.viewLayerToolbox_props.precomp_freestyle_prop
+        sort_option = work_scene.VLToolbox_props.outputs_sort_prop
+        precomp_bg_under_prop = work_scene.VLToolbox_props.precomp_bg_under_prop
+        precomp_bg_img_prop = work_scene.VLToolbox_props.precomp_bg_img_prop
+        precomp_freestyle_prop = work_scene.VLToolbox_props.precomp_freestyle_prop
         
         # create scene list to process
         scenes_list = []
-        if bpy.context.scene.viewLayerToolbox_props.outputs_scenes_selection == "ALL SCENES":
+        if bpy.context.scene.VLToolbox_props.outputs_scenes_selection == "ALL SCENES":
             for scene in bpy.data.scenes:
                 scenes_list.append(scene)
-        elif bpy.context.scene.viewLayerToolbox_props.outputs_scenes_selection == "ALL SCENES WITH CURRENT SETTINGS":
+        elif bpy.context.scene.VLToolbox_props.outputs_scenes_selection == "ALL SCENES WITH CURRENT SETTINGS":
             for scene in bpy.data.scenes:
-                scene.viewLayerToolbox_props.outputs_scenes_selection = work_scene.viewLayerToolbox_props.outputs_scenes_selection
-                scene.viewLayerToolbox_props.outputs_reset_selection = work_scene.viewLayerToolbox_props.outputs_reset_selection
+                scene.VLToolbox_props.outputs_scenes_selection = work_scene.VLToolbox_props.outputs_scenes_selection
+                scene.VLToolbox_props.outputs_reset_selection = work_scene.VLToolbox_props.outputs_reset_selection
                 scenes_list.append(scene)
-        elif bpy.context.scene.viewLayerToolbox_props.outputs_scenes_selection == "CURRENT SCENE":
+        elif bpy.context.scene.VLToolbox_props.outputs_scenes_selection == "CURRENT SCENE":
             scenes_list.append(work_scene)
 
         #print(f"{scenes_list=}")
@@ -502,7 +628,7 @@ class VLTOOLBOX_OT_createprecomp(bpy.types.Operator):
             node_tree = bpy.data.scenes[scene_name].node_tree
             if len(node_tree.nodes)==2: # in case of it's a new node tree, renderlayer + composite node are in
                 node_tree.nodes.clear()
-            if bpy.context.scene.viewLayerToolbox_props.outputs_reset_selection == "RESET ALL TREE":
+            if bpy.context.scene.VLToolbox_props.outputs_reset_selection == "RESET ALL TREE":
                 node_tree.nodes.clear()
             # list all render layers
             selected_scene_layer_list = list_renderlayers(work_scene,sort_option)
@@ -520,7 +646,7 @@ class VLTOOLBOX_OT_createprecomp(bpy.types.Operator):
             location_x = 2000
             location_x_add = 300
             node_alphaOver_list = []
-            #print(f"{work_scene.viewLayerToolbox_props.precomp_input_prop=}")
+            #print(f"{work_scene.VLToolbox_props.precomp_input_prop=}")
             for node in renderLayer_nodes_list:
                 if precomp_freestyle_prop and scene.render.use_freestyle and bpy.context.scene.view_layers[-1].freestyle_settings.as_render_pass: # be sure freestyle will be created
                     # add line on top of color with an alpha over
@@ -616,9 +742,12 @@ class VLTOOLBOX_OT_createprecomp(bpy.types.Operator):
 classes = (
     VLTOOLBOX_properties,
     VIVLTOOLBOX_PT_filesoutput,
+    VIVLTOOLBOX_PT_filesoutputfieldsoptions,
     VIVLTOOLBOX_PT_filesoutputoptions,
     VIVLTOOLBOX_PT_precompoptions,
     VLTOOLBOX_OT_createnodesoutput,
+    VLTOOLBOX_OT_dellastcharacter,
+    VLTOOLBOX_OT_add_character_enum,
     VLTOOLBOX_OT_createprecomp,
     )
 
@@ -626,11 +755,11 @@ classes = (
 def register():
     for cls in classes:
         bpy.utils.register_class(cls)
-    bpy.types.Scene.viewLayerToolbox_props = bpy.props.PointerProperty (type = VLTOOLBOX_properties)
+    bpy.types.Scene.VLToolbox_props = bpy.props.PointerProperty (type = VLTOOLBOX_properties)
 
 #unregister classes 
 def unregister():    
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)
-    del bpy.types.Scene.viewLayerToolbox_props
+    del bpy.types.Scene.VLToolbox_props
         
