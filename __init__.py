@@ -25,7 +25,7 @@ bl_info = {
     "warning": "",
     "category": "View Layers",
     "blender": (3,6,0),
-    "version": (1,2,11)
+    "version": (1,2,22)
 }
 
 # get addon name and version to use them automaticaly in the addon
@@ -503,13 +503,16 @@ def create_outputsNodes(selected_scene,selected_scene_layer_list,output_enabled_
             compo_tree.nodes[output_node_name].inputs.clear()
             for output in output_enabled_list:
                 output_slot = output
-                # check if user wants to change the name
-                if output in outputs_corresponding_dict.keys():
-                    output = outputs_corresponding_dict[output]
+                # # check if user wants to change the name
+                # if output in outputs_corresponding_dict.keys():
+                #     output = outputs_corresponding_dict[output]
                 # create the outputs paths regarding user fields
                 vloutput_path = vloutputs_nodes_paths(layer.name,output)
 
-                #input_slot = f"{outputs_prefix_prop}{layername}_{pass_name}{output_filename_end_prop}"
+                # check if user wants to change the string
+                for string in outputs_corresponding_dict.keys():
+                    if string in vloutput_path :
+                        vloutput_path = vloutput_path.replace(string,outputs_corresponding_dict.get(string))
                 input_slot = vloutput_path
                 #print(f"{input_slot=}")
                 #print(f"{output_slot=}")
@@ -522,15 +525,26 @@ def create_outputsNodes(selected_scene,selected_scene_layer_list,output_enabled_
             iter = 0
             for input_slot in output_enabled_list:
                 # check if user wants to change the name
-                if input_slot in outputs_corresponding_dict.keys():
-                    input_slot = outputs_corresponding_dict[input_slot]
+                # if input_slot in outputs_corresponding_dict.keys():
+                #     input_slot = outputs_corresponding_dict[input_slot]
                 # create the outputs paths regarding user fields
                 vloutput_path = vloutputs_nodes_paths(layer.name,input_slot)
+                # check if user wants to change the string
+                for string in outputs_corresponding_dict.keys():
+                    if string in vloutput_path :
+                        vloutput_path = vloutput_path.replace(string,outputs_corresponding_dict.get(string))
+                # change the name
                 if bpy.context.scene.VLToolbox_props.outputs_alpha_solo == False and input_slot != "Alpha":
                     compo_tree.nodes[output_node_name].file_slots[iter].path = vloutput_path
                     iter += 1
                 elif input_slot == "Alpha":
                     iter += 1
+
+        # # check if user wants to change the string
+        # for input_slot in compo_tree.nodes[output_node_name].file_slots:
+        #     for string in outputs_corresponding_dict.keys():
+        #         if string in input_slot.path :
+        #             input_slot.path = input_slot.path.replace(string,outputs_corresponding_dict.get(string))
 
         # clean unused output
         if clear_unusedSockets_prop:
@@ -588,6 +602,7 @@ class VLTOOLBOX_OT_createnodesoutput(bpy.types.Operator):
                 bpy.context.window.scene = work_scene # switch back to user scene work
                 #print(" --- scene finished --- ")
 
+        print(f"\n {separator} {Addon_Name} Finished {separator} \n")
         return {"FINISHED"}
 
 class VLTOOLBOX_OT_dellastcharacter(bpy.types.Operator):
