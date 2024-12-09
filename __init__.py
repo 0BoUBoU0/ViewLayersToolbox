@@ -25,7 +25,7 @@ bl_info = {
     "warning": "",
     "category": "View Layers",
     "blender": (3,6,0),
-    "version": (1,3,12)
+    "version": (1,3,2)
 }
 
 # get addon name and version to use them automaticaly in the addon
@@ -40,6 +40,17 @@ from random import uniform
 debug_mode = False
 separator = "-" * 20
 precomp_scene_suffixe = "_Pre-Compositing"
+
+## define addon preferences
+class VLTOOLBOX_Preferences(bpy.types.AddonPreferences):
+    bl_idname = __name__
+
+    precomp_checkbox_pref : bpy.props.BoolProperty(name="Precomp Tab", default=False, description = "if checked, show precomp tab")
+
+    def draw(self, context):
+        layout = self.layout
+        row = layout.row()
+        row.prop(self, "precomp_checkbox_pref")
 
 ### create property ###
 class VLTOOLBOX_properties (bpy.types.PropertyGroup):
@@ -235,6 +246,11 @@ class VIVLTOOLBOX_PT_precomptree(bpy.types.Panel):
     bl_context = 'output'
     #bl_parent_id = "RENDER_PT_output"
     
+    # show the tab regarding preferences
+    @classmethod
+    def poll(cls, context):
+        return context.preferences.addons[__name__].preferences.precomp_checkbox_pref
+
     def draw_header(self, context):
         layout = self.layout
         layout.label(text="", icon='NODETREE')
@@ -257,7 +273,12 @@ class VIVLTOOLBOX_PT_precompoptions(bpy.types.Panel):
     bl_parent_id = "VIVLTOOLBOX_PT_precomptree"
     bl_options = {"DEFAULT_CLOSED"}
 
-    def draw_header(self, context):
+    # show the tab regarding preferences
+    @classmethod
+    def poll(cls, context):
+        return context.preferences.addons[__name__].preferences.precomp_checkbox_pref
+
+    def draw_header(self, context): # add an icon
         layout = self.layout
         layout.label(text="", icon='NODE')
 
@@ -807,6 +828,7 @@ class VLTOOLBOX_OT_createprecomp(bpy.types.Operator):
 
 # list all classes
 classes = (
+    VLTOOLBOX_Preferences,
     VLTOOLBOX_properties,
     VIVLTOOLBOX_PT_filesoutput,
     VIVLTOOLBOX_PT_filesoutputfieldsoptions,
