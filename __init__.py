@@ -25,7 +25,7 @@ bl_info = {
     "warning": "",
     "category": "View Layers",
     "blender": (3,6,0),
-    "version": (1,3,2)
+    "version": (1,3,21)
 }
 
 # get addon name and version to use them automaticaly in the addon
@@ -628,18 +628,17 @@ class VLTOOLBOX_OT_createnodesoutput(bpy.types.Operator):
         # process
         for scene in scenes_list:
             if precomp_scene_suffixe not in bpy.context.scene.name:
-                #if bpy.context.scene.use_nodes: # check if comp tree is on
-                #bpy.context.window.scene = scene # switch scene to well create render node (it depends of the current scene)
-                if scene.vltoolbox_props.outputs_reset_selection == "RESET ALL TREE":
-                    scene.node_tree.nodes.clear()
-                # list all render layers
-                selected_scene_layer_list = list_renderlayers(work_scene,sort_option)
-                # create render layers
-                output_enabled_dict = create_renderlayers_nodes(work_scene,selected_scene_layer_list)
-                # create output nodes
-                create_outputsNodes(work_scene,selected_scene_layer_list,output_enabled_dict)
-                bpy.context.window.scene = work_scene # switch back to user scene work
-                #print(" --- scene finished --- ")
+                if scene.use_nodes : # check if comp tree is on
+                    if scene.vltoolbox_props.outputs_reset_selection == "RESET ALL TREE":
+                        scene.node_tree.nodes.clear()
+                    # list all render layers
+                    selected_scene_layer_list = list_renderlayers(work_scene,sort_option)
+                    # create render layers
+                    output_enabled_dict = create_renderlayers_nodes(work_scene,selected_scene_layer_list)
+                    # create output nodes
+                    create_outputsNodes(work_scene,selected_scene_layer_list,output_enabled_dict)
+                    bpy.context.window.scene = work_scene # switch back to user scene work
+                    #print(" --- scene finished --- ")
 
             # use a user script if wanted
             if bpy.context.scene.vltoolbox_props.vloutputs_postscript_checkbox_prop:
