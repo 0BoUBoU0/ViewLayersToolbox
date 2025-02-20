@@ -25,7 +25,7 @@ bl_info = {
     "warning": "",
     "category": "View Layers",
     "blender": (3,6,0),
-    "version": (1,3,21)
+    "version": (1,3,33)
 }
 
 # get addon name and version to use them automaticaly in the addon
@@ -87,6 +87,24 @@ class VLTOOLBOX_properties (bpy.types.PropertyGroup):
     vloutputs_pathlength_prop : bpy.props.IntProperty(default=0, name="", description='')
     vloutputs_postscript_checkbox_prop : bpy.props.BoolProperty (default=False,name="",description="launch this script after action it")
     vloutputs_postscript_prop : bpy.props.PointerProperty (type=bpy.types.Text, name="Additional Script", description="script to launch after the nodes creation")
+    vloutputs_fileformat_checkbox_prop : bpy.props.BoolProperty (default=False,name="",description="if checked, will use custom image type. If unchecked, will use the scene output file's type")
+    vloutputs_fileformat_options = [ #'BMP', 'IRIS', 'PNG', 'JPEG', 'JPEG2000', 'TARGA', 'TARGA_RAW', 'CINEON', 'DPX', 'OPEN_EXR_MULTILAYER', 'OPEN_EXR', 'HDR', 'TIFF', 'WEBP'
+                            ('BMP','BMP','BMP',0),
+                            ('IRIS','IRIS','IRIS',1),
+                            ('PNG','PNG','PNG',2),
+                            ('JPEG','JPEG','JPEG',3),
+                            ('JPEG2000','JPEG2000','JPEG2000',4),
+                            ('TARGA','TARGA','TARGA',5),
+                            ('TARGA_RAW','TARGA_RAW','TARGA_RAW',6),
+                            ('CINEON','CINEON','CINEON',7),
+                            ('DPX','DPX','DPX',8),
+                            ('OPEN_EXR_MULTILAYER','OPEN_EXR_MULTILAYER','OPEN_EXR_MULTILAYER',9),
+                            ('OPEN_EXR','OPEN_EXR','OPEN_EXR',10),
+                            ('HDR','HDR','HDR',11),
+                            ('TIFF','TIFF','TIFF',12),
+                            ('WEBP','WEBP','WEBP',13),
+                            ]
+    vloutputs_fileformat_prop : bpy.props.EnumProperty (items = vloutputs_fileformat_options,name = "Node Output Image Type",description = "choose image type",default=2)
 
     ## precomp
     precomp_bg_under_prop : bpy.props.BoolProperty(default=False,name="",description="")
@@ -231,6 +249,10 @@ class VIVLTOOLBOX_PT_filesoutputoptions(bpy.types.Panel):
         row.prop(vltoolbox_props, "outputs_scenes_selection")
         row = box.row()
         row.prop(vltoolbox_props, "outputs_alpha_solo")
+        split = row.split(factor = .05)
+        split.active = vltoolbox_props.vloutputs_fileformat_checkbox_prop
+        split.prop(vltoolbox_props, "vloutputs_fileformat_checkbox_prop")
+        split.prop(vltoolbox_props, "vloutputs_fileformat_prop")
         # add script
         box = layout.box()
         box.active = vltoolbox_props.vloutputs_postscript_checkbox_prop
@@ -476,6 +498,8 @@ def create_outputsNodes(selected_scene,selected_scene_layer_list,output_enabled_
     vloutputs_corresponding_prop = bpy.context.scene.vltoolbox_props.vloutputs_corresponding_prop
     clear_unusedSockets_prop = bpy.context.scene.vltoolbox_props.clear_unusedSockets_prop
     outputs_reset_selection = bpy.context.scene.vltoolbox_props.outputs_reset_selection
+    vloutputs_fileformat_checkbox_prop = bpy.context.scene.vltoolbox_props.vloutputs_fileformat_checkbox_prop
+    vloutputs_fileformat_prop = bpy.context.scene.vltoolbox_props.vloutputs_fileformat_prop
 
     # change names regarding the translation dic (Image=rgba, etc)
     outputs_corresponding_list = vloutputs_corresponding_prop.split(',')
@@ -495,6 +519,12 @@ def create_outputsNodes(selected_scene,selected_scene_layer_list,output_enabled_
             main_file_output.remove(file_name)
             main_file_output = separator.join(main_file_output)
             main_file_output = f"{main_file_output}{separator}"
+
+    # check output image type
+    if vloutputs_fileformat_checkbox_prop:
+        file_format = vloutputs_fileformat_prop
+    else:
+        file_format = selected_scene.render.image_settings.file_format
 
     ## create outputs nodes
     iter_node = 0
@@ -523,7 +553,7 @@ def create_outputsNodes(selected_scene,selected_scene_layer_list,output_enabled_
             compo_tree.nodes[output_node_name].use_custom_color = True
             compo_tree.nodes[output_node_name].color = compo_tree.nodes[render_node_name].color # give the same color as render layer node
             compo_tree.nodes[output_node_name].mute = compo_tree.nodes[render_node_name].mute # check if mute
-            compo_tree.nodes[output_node_name].format.file_format = selected_scene.render.image_settings.file_format
+            compo_tree.nodes[output_node_name].format.file_format = file_format
             compo_tree.nodes[output_node_name].format.color_mode = selected_scene.render.image_settings.color_mode
             compo_tree.nodes[output_node_name].format.color_depth = selected_scene.render.image_settings.color_depth
             compo_tree.nodes[output_node_name].format.compression = selected_scene.render.image_settings.compression
