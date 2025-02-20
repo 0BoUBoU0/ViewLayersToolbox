@@ -25,7 +25,7 @@ bl_info = {
     "warning": "",
     "category": "View Layers",
     "blender": (3,6,0),
-    "version": (1,3,33)
+    "version": (1,3,34)
 }
 
 # get addon name and version to use them automaticaly in the addon
@@ -500,6 +500,7 @@ def create_outputsNodes(selected_scene,selected_scene_layer_list,output_enabled_
     outputs_reset_selection = bpy.context.scene.vltoolbox_props.outputs_reset_selection
     vloutputs_fileformat_checkbox_prop = bpy.context.scene.vltoolbox_props.vloutputs_fileformat_checkbox_prop
     vloutputs_fileformat_prop = bpy.context.scene.vltoolbox_props.vloutputs_fileformat_prop
+    outputs_alpha_solo = bpy.context.scene.vltoolbox_props.outputs_alpha_solo
 
     # change names regarding the translation dic (Image=rgba, etc)
     outputs_corresponding_list = vloutputs_corresponding_prop.split(',')
@@ -554,9 +555,17 @@ def create_outputsNodes(selected_scene,selected_scene_layer_list,output_enabled_
             compo_tree.nodes[output_node_name].color = compo_tree.nodes[render_node_name].color # give the same color as render layer node
             compo_tree.nodes[output_node_name].mute = compo_tree.nodes[render_node_name].mute # check if mute
             compo_tree.nodes[output_node_name].format.file_format = file_format
-            compo_tree.nodes[output_node_name].format.color_mode = selected_scene.render.image_settings.color_mode
+            if vloutputs_fileformat_checkbox_prop:
+                if outputs_alpha_solo:
+                    compo_tree.nodes[output_node_name].format.color_mode = 'RGB'
+                else:
+                    compo_tree.nodes[output_node_name].format.color_mode = 'RGBA'
+            else:
+                compo_tree.nodes[output_node_name].format.color_mode = selected_scene.render.image_settings.color_mode
             compo_tree.nodes[output_node_name].format.color_depth = selected_scene.render.image_settings.color_depth
             compo_tree.nodes[output_node_name].format.compression = selected_scene.render.image_settings.compression
+
+
         else:
             new_output = False
 
