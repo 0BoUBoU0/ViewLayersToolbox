@@ -25,7 +25,7 @@ bl_info = {
     "warning": "",
     "category": "View Layers",
     "blender": (3,6,0),
-    "version": (1,3,34)
+    "version": (1,3,423)
 }
 
 # get addon name and version to use them automaticaly in the addon
@@ -80,7 +80,7 @@ class VLTOOLBOX_properties (bpy.types.PropertyGroup):
     clear_unusedSockets_prop : bpy.props.BoolProperty (default=False,name="Clear Unused Output",description="if checked, clear user unused outputs")
     use_layerName_in_pass_prop : bpy.props.BoolProperty (default=False,name="Use Layer Name",description="if checked, the view layer name will be added in each pass name")
 
-    vloutputs_path_previs: bpy.props.StringProperty(default="[Layer Name]**\\**[Pass Name]**\\", name="Output previs", description='output path')
+    vloutputs_path_previs: bpy.props.StringProperty(default="[Base Path]**[Layer Name]**\\**[Pass Name]**\\", name="Output previs", description='output path')
     vloutputs_customfield_a_prop: bpy.props.StringProperty(default="", name="", description='First user custom field (A)')
     vloutputs_customfield_b_prop: bpy.props.StringProperty(default="", name="", description='Second user custom field (B)')
     vloutputs_customfield_c_prop: bpy.props.StringProperty(default="", name="", description='Third user custom field (C)')
@@ -188,7 +188,8 @@ class VIVLTOOLBOX_PT_filesoutputfieldsoptions(bpy.types.Panel):
             ("[Scene Name]", "Scene Name","SCENE_DATA"),
             ("[File Name]", "File Name","FILE"),
             ("[Camera Name]", "Camera Name","CAMERA_DATA"),
-            ("[File Version]", "File Version","LINENUMBERS_ON")
+            ("[File Version]", "File Version","LINENUMBERS_ON"),
+            #("[Frame Number]", "Frame Number","TIME")
         ]
         ui_blocs(char_options_A)
         # separators
@@ -456,9 +457,12 @@ def vloutputs_nodes_paths(layername,outputname):
     scene = bpy.context.scene
     vloutput_path = scene.vltoolbox_props.vloutputs_path_previs
     output_split = vloutput_path.split("**")
+    #print(f"{output_split=}")
     vloutput_filepath = ""
     for elem in output_split:
-        if elem == "[Pass Name]":
+        if elem == "[Base Path]":
+            elem = ""
+        elif elem == "[Pass Name]":
             elem = outputname
         elif elem == "[Layer Name]":
             elem = layername
@@ -481,6 +485,8 @@ def vloutputs_nodes_paths(layername,outputname):
             else:
                 file_version = "v001"
             elem = file_version
+        # elif elem == "[Frame Number]":
+        #     elem = str(scene.frame_current)
         
         vloutput_filepath += elem # create the complete path
         clean_filepath = vloutput_filepath.replace("\\\\", "\\").replace("\\//", "\\").replace("////", "//") # clean to avoid dirty things
@@ -492,8 +498,6 @@ def create_outputsNodes(selected_scene,selected_scene_layer_list,output_enabled_
     selected_scene = selected_scene
     selected_scene_layer_list = selected_scene_layer_list
     output_enabled_dict = output_enabled_dict
-    
-    bpy.data.scenes[selected_scene.name].use_nodes = True
     compo_tree = bpy.data.scenes[selected_scene.name].node_tree
     vloutputs_corresponding_prop = bpy.context.scene.vltoolbox_props.vloutputs_corresponding_prop
     clear_unusedSockets_prop = bpy.context.scene.vltoolbox_props.clear_unusedSockets_prop
@@ -502,6 +506,8 @@ def create_outputsNodes(selected_scene,selected_scene_layer_list,output_enabled_
     vloutputs_fileformat_prop = bpy.context.scene.vltoolbox_props.vloutputs_fileformat_prop
     outputs_alpha_solo = bpy.context.scene.vltoolbox_props.outputs_alpha_solo
 
+    bpy.data.scenes[selected_scene.name].use_nodes = True
+
     # change names regarding the translation dic (Image=rgba, etc)
     outputs_corresponding_list = vloutputs_corresponding_prop.split(',')
     outputs_corresponding_dict = {}
@@ -509,6 +515,7 @@ def create_outputsNodes(selected_scene,selected_scene_layer_list,output_enabled_
         corres = corres.replace(" ","")
         corres_split = corres.split("=")
         outputs_corresponding_dict[corres_split[0]] = corres_split[-1]
+        #print(f"{outputs_corresponding_dict=}")
 
     # remove main output namefile to keep only filepath : 
     main_file_output = selected_scene.render.filepath
@@ -564,8 +571,6 @@ def create_outputsNodes(selected_scene,selected_scene_layer_list,output_enabled_
                 compo_tree.nodes[output_node_name].format.color_mode = selected_scene.render.image_settings.color_mode
             compo_tree.nodes[output_node_name].format.color_depth = selected_scene.render.image_settings.color_depth
             compo_tree.nodes[output_node_name].format.compression = selected_scene.render.image_settings.compression
-
-
         else:
             new_output = False
 
@@ -586,6 +591,7 @@ def create_outputsNodes(selected_scene,selected_scene_layer_list,output_enabled_
                 #     output = outputs_corresponding_dict[output]
                 # create the outputs paths regarding user fields
                 vloutput_path = vloutputs_nodes_paths(layer.name,output)
+                #print(f"{vloutput_path=}")
 
                 # check if user wants to change the string
                 for string in outputs_corresponding_dict.keys():
@@ -618,11 +624,13 @@ def create_outputsNodes(selected_scene,selected_scene_layer_list,output_enabled_
                 elif input_slot == "Alpha":
                     iter += 1
 
-        # # check if user wants to change the string
-        # for input_slot in compo_tree.nodes[output_node_name].file_slots:
-        #     for string in outputs_corresponding_dict.keys():
-        #         if string in input_slot.path :
-        #             input_slot.path = input_slot.path.replace(string,outputs_corresponding_dict.get(string))
+        # update base path (from scene output)
+        base_path = compo_tree.nodes[output_node_name].base_path
+        #print(f"{base_path=}")
+        for string in outputs_corresponding_dict.keys():
+            if string in base_path :
+                compo_tree.nodes[output_node_name].base_path = base_path.replace(string,outputs_corresponding_dict.get(string))
+
 
         # clean unused output
         if clear_unusedSockets_prop:
@@ -693,8 +701,9 @@ class VLTOOLBOX_OT_dellastcharacter(bpy.types.Operator):
     
     def execute(self, context):
         vloutputs_path_previs = context.scene.vltoolbox_props.vloutputs_path_previs
-        output_split = vloutputs_path_previs.split("**")
-        context.scene.vltoolbox_props.vloutputs_path_previs = "**".join(output_split[:-1])
+        if vloutputs_path_previs != "[Base Path]":
+            output_split = vloutputs_path_previs.split("**")
+            context.scene.vltoolbox_props.vloutputs_path_previs = "**".join(output_split[:-1])
         return {"FINISHED"}
 
 # Generic operator for adding characters
