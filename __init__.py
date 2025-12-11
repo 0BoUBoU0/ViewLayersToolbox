@@ -25,7 +25,7 @@ bl_info = {
     "warning": "",
     "category": "View Layers",
     "blender": (3,6,0),
-    "version": (1,3,423)
+    "version": (1,3,44)
 }
 
 # get addon name and version to use them automaticaly in the addon
@@ -79,6 +79,8 @@ class VLTOOLBOX_properties (bpy.types.PropertyGroup):
     vloutputs_corresponding_prop : bpy.props.StringProperty(name="Translation",default="Image=rgba",description='translate field a to field b, separated by ",". I.E. "Image=rgba,Alpha=alpha"')
     clear_unusedSockets_prop : bpy.props.BoolProperty (default=False,name="Clear Unused Output",description="if checked, clear user unused outputs")
     use_layerName_in_pass_prop : bpy.props.BoolProperty (default=False,name="Use Layer Name",description="if checked, the view layer name will be added in each pass name")
+    change_only_node_output_prop : bpy.props.BoolProperty (default=False,name="Change Only Node Path",description="if checked, will only change in the node output path, without touching the base path")
+    del_x_signs_prop : bpy.props.IntProperty (default=0,name="Delete X First Signs",description="")
 
     vloutputs_path_previs: bpy.props.StringProperty(default="[Base Path]**[Layer Name]**\\**[Pass Name]**\\", name="Output previs", description='output path')
     vloutputs_customfield_a_prop: bpy.props.StringProperty(default="", name="", description='First user custom field (A)')
@@ -225,6 +227,8 @@ class VIVLTOOLBOX_PT_filesoutputfieldsoptions(bpy.types.Panel):
         split.prop(context.scene.vltoolbox_props, "vloutputs_customfield_c_prop")
         row = box.row()
         row.prop(vltoolbox_props, "vloutputs_corresponding_prop")
+        row.prop(vltoolbox_props, "change_only_node_output_prop",icon="OUTLINER_DATA_LIGHTPROBE",text="")
+        row.prop(vltoolbox_props, "del_x_signs_prop")
 
 class VIVLTOOLBOX_PT_filesoutputoptions(bpy.types.Panel):
     bl_label = "Output Options"
@@ -456,6 +460,8 @@ def create_renderlayers_nodes(selected_scene,selected_scene_layer_list):
 def vloutputs_nodes_paths(layername,outputname):
     scene = bpy.context.scene
     vloutput_path = scene.vltoolbox_props.vloutputs_path_previs
+    del_x_signs_prop = bpy.context.scene.vltoolbox_props.del_x_signs_prop
+    vloutputs_corresponding_prop = bpy.context.scene.vltoolbox_props.vloutputs_corresponding_prop
     output_split = vloutput_path.split("**")
     #print(f"{output_split=}")
     vloutput_filepath = ""
@@ -487,11 +493,33 @@ def vloutputs_nodes_paths(layername,outputname):
             elem = file_version
         # elif elem == "[Frame Number]":
         #     elem = str(scene.frame_current)
+
+        # allow user to use bpy. blablabla
+        if elem.startswith("bpy."):
+            parts = elem.split(".")
+            obj = bpy
+            for part in parts[1:]:  # ignore "bpy"
+                obj = getattr(obj, part)
+            elem = obj
         
         vloutput_filepath += elem # create the complete path
-        clean_filepath = vloutput_filepath.replace("\\\\", "\\").replace("\\//", "\\").replace("////", "//") # clean to avoid dirty things
-    scene.vltoolbox_props.vloutputs_pathlength_prop = len(clean_filepath)
-    return clean_filepath
+
+        clean_filepath = vloutput_filepath.replace("\\\\", "\\").replace("\\//", "\\").replace("////", "//") # clean to avoid dirty things 
+        # change names regarding the translation dic (Image=rgba, etc)
+        outputs_corresponding_list = vloutputs_corresponding_prop.split(',')
+        outputs_corresponding_dict = {}
+        for corres in outputs_corresponding_list:
+            corres = corres.replace(" ","")
+            corres_split = corres.split("=")
+            outputs_corresponding_dict[corres_split[0]] = corres_split[-1]
+            #print(f"{outputs_corresponding_dict=}")
+        # check if user wants to change the string
+        for string in outputs_corresponding_dict.keys():
+            if string in clean_filepath :
+                clean_filepath = clean_filepath.replace(string,outputs_corresponding_dict.get(string))
+
+    scene.vltoolbox_props.vloutputs_pathlength_prop = len(clean_filepath[del_x_signs_prop:])
+    return clean_filepath[del_x_signs_prop:]
 
 def create_outputsNodes(selected_scene,selected_scene_layer_list,output_enabled_dict):
     ## variables
@@ -505,6 +533,8 @@ def create_outputsNodes(selected_scene,selected_scene_layer_list,output_enabled_
     vloutputs_fileformat_checkbox_prop = bpy.context.scene.vltoolbox_props.vloutputs_fileformat_checkbox_prop
     vloutputs_fileformat_prop = bpy.context.scene.vltoolbox_props.vloutputs_fileformat_prop
     outputs_alpha_solo = bpy.context.scene.vltoolbox_props.outputs_alpha_solo
+    change_only_node_output_prop = bpy.context.scene.vltoolbox_props.change_only_node_output_prop
+    del_x_signs_prop = bpy.context.scene.vltoolbox_props.del_x_signs_prop
 
     bpy.data.scenes[selected_scene.name].use_nodes = True
 
@@ -594,9 +624,10 @@ def create_outputsNodes(selected_scene,selected_scene_layer_list,output_enabled_
                 #print(f"{vloutput_path=}")
 
                 # check if user wants to change the string
-                for string in outputs_corresponding_dict.keys():
-                    if string in vloutput_path :
-                        vloutput_path = vloutput_path.replace(string,outputs_corresponding_dict.get(string))
+                # for string in outputs_corresponding_dict.keys():
+                #     if string in vloutput_path :
+                #         vloutput_path = vloutput_path.replace(string,outputs_corresponding_dict.get(string))
+                #vloutput_path = vloutput_path[del_x_signs_prop:]
                 input_slot = vloutput_path
                 #print(f"{input_slot=}")
                 #print(f"{output_slot=}")
@@ -614,9 +645,10 @@ def create_outputsNodes(selected_scene,selected_scene_layer_list,output_enabled_
                 # create the outputs paths regarding user fields
                 vloutput_path = vloutputs_nodes_paths(layer.name,input_slot)
                 # check if user wants to change the string
-                for string in outputs_corresponding_dict.keys():
-                    if string in vloutput_path :
-                        vloutput_path = vloutput_path.replace(string,outputs_corresponding_dict.get(string))
+                # for string in outputs_corresponding_dict.keys():
+                #     if string in vloutput_path :
+                #         vloutput_path = vloutput_path.replace(string,outputs_corresponding_dict.get(string))
+                #vloutput_path = vloutput_path[del_x_signs_prop:]
                 # change the name
                 if bpy.context.scene.vltoolbox_props.outputs_alpha_solo == False and input_slot != "Alpha":
                     compo_tree.nodes[output_node_name].file_slots[iter].path = vloutput_path
@@ -627,9 +659,10 @@ def create_outputsNodes(selected_scene,selected_scene_layer_list,output_enabled_
         # update base path (from scene output)
         base_path = compo_tree.nodes[output_node_name].base_path
         #print(f"{base_path=}")
-        for string in outputs_corresponding_dict.keys():
-            if string in base_path :
-                compo_tree.nodes[output_node_name].base_path = base_path.replace(string,outputs_corresponding_dict.get(string))
+        if change_only_node_output_prop == False:
+            for string in outputs_corresponding_dict.keys():
+                if string in base_path :
+                    compo_tree.nodes[output_node_name].base_path = base_path.replace(string,outputs_corresponding_dict.get(string))
 
 
         # clean unused output
