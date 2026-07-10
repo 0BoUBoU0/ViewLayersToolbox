@@ -8,8 +8,8 @@ bl_info = {
     "doc_url": "",
     "warning": "",
     "category": "View Layers",
-    "blender": (3, 6, 0),
-    "version": (1, 4, 5),
+    "blender": (5, 0, 0),
+    "version": (2, 0, 0),
 }
 
 # get addon name and version to use them automaticaly in the addon
@@ -22,7 +22,7 @@ import os
 from random import uniform
 
 ### define global variables ###
-STRIP_NAME = 'SEQUENCE' if bpy.app.version < (4,4,0) else 'STRIP'
+STRIP_NAME = 'STRIP'
 SEPARATOR = "-" * 20
 PRECOMP_SCENE_SUFFIXE = "_Pre-Compositing"
 
@@ -38,6 +38,14 @@ def get_base_path(scene):
             main_file_output = separator.join(main_file_output)
             main_file_output = f"{main_file_output}{separator}"
     return main_file_output
+
+def get_compositing_tree(scene):
+    # since Blender 5.0 the compositor tree is a node group datablock, create one if the scene has none
+    tree = scene.compositing_node_group
+    if tree is None:
+        tree = bpy.data.node_groups.new(f"{scene.name}_compositing", 'CompositorNodeTree')
+        scene.compositing_node_group = tree
+    return tree
 
 
 # region addon preferences
@@ -393,7 +401,7 @@ def list_renderlayers(selected_scene,sort_option):
 def list_renderlayers_nodes(selected_scene,sort_option):
     ## variables
     selected_scene = selected_scene
-    node_tree = selected_scene.node_tree
+    node_tree = get_compositing_tree(selected_scene)
 
     renderLayer_nodes_list = []
     for node in node_tree.nodes:
@@ -427,9 +435,8 @@ def create_renderlayers_nodes(selected_scene, selected_scene_layer_list):
     outputs_reset_selection = bpy.context.scene.vloutputs_props.outputs_reset_selection
 
     output_enabled_dict = {}
-    
-    bpy.data.scenes[selected_scene.name].use_nodes = True
-    compo_tree = bpy.data.scenes[selected_scene.name].node_tree
+
+    compo_tree = get_compositing_tree(bpy.data.scenes[selected_scene.name])
 
     ## create render layers
     iter_node = 0
@@ -569,7 +576,7 @@ def create_outputsNodes(selected_scene, selected_scene_layer_list, output_enable
     selected_scene = selected_scene
     selected_scene_layer_list = selected_scene_layer_list
     output_enabled_dict = output_enabled_dict
-    compo_tree = bpy.data.scenes[selected_scene.name].node_tree
+    compo_tree = get_compositing_tree(bpy.data.scenes[selected_scene.name])
     output_corresponding = bpy.context.scene.vloutputs_props.output_corresponding
     clear_unusedSockets = bpy.context.scene.vloutputs_props.clear_unusedSockets
     outputs_reset_selection = bpy.context.scene.vloutputs_props.outputs_reset_selection
@@ -578,8 +585,6 @@ def create_outputsNodes(selected_scene, selected_scene_layer_list, output_enable
     outputs_alpha_solo = bpy.context.scene.vloutputs_props.outputs_alpha_solo
     change_only_node_output = bpy.context.scene.vloutputs_props.change_only_node_output
     del_x_signs = bpy.context.scene.vloutputs_props.del_x_signs
-
-    bpy.data.scenes[selected_scene.name].use_nodes = True
 
     # change names regarding the translation dic (Image=rgba, etc)
     outputs_output_corresponding_list = output_corresponding.split(',')
@@ -643,6 +648,8 @@ def create_outputsNodes(selected_scene, selected_scene_layer_list, output_enable
                 compo_tree.nodes[output_node_name].use_custom_color = True
                 compo_tree.nodes[output_node_name].color = compo_tree.nodes[render_node_name].color # give the same color as render layer node
                 compo_tree.nodes[output_node_name].mute = compo_tree.nodes[render_node_name].mute # check if mute
+                # media_type must be switched first, it filters the available file formats (node default is multilayer EXR)
+                compo_tree.nodes[output_node_name].format.media_type = 'MULTI_LAYER_IMAGE' if file_format == 'OPEN_EXR_MULTILAYER' else 'IMAGE'
                 compo_tree.nodes[output_node_name].format.file_format = file_format
                 if fileformat_checkbox:
                     if outputs_alpha_solo:
@@ -659,13 +666,14 @@ def create_outputsNodes(selected_scene, selected_scene_layer_list, output_enable
             #print(f"{new_output=}")
 
             # update output node path (different from output names !)
-            compo_tree.nodes[output_node_name].base_path = f"{layer_basepath}"
+            compo_tree.nodes[output_node_name].directory = f"{layer_basepath}"
+            compo_tree.nodes[output_node_name].file_name = "" # file names are fully composed by the output items names
 
             output_enabled_list = output_enabled_dict[render_node_name]
             f"{output_enabled_list=}"
             ## create inputs in file outputs node regarding view layer
             if new_output or outputs_reset_selection == "ONLY UPDATE LINKS":
-                compo_tree.nodes[output_node_name].inputs.clear()
+                compo_tree.nodes[output_node_name].file_output_items.clear()
                 for output in output_enabled_list:
                     output_slot = output
                     # # check if user wants to change the name
@@ -683,7 +691,7 @@ def create_outputsNodes(selected_scene, selected_scene_layer_list, output_enable
                     input_slot = vloutput_path
                     #print(f"{input_slot=}")
                     #print(f"{output_slot=}")
-                    compo_tree.nodes[output_node_name].layer_slots.new(input_slot) # "." is for better readability in files
+                    compo_tree.nodes[output_node_name].file_output_items.new('RGBA', input_slot)
                     if bpy.context.scene.vloutputs_props.pathlength<=64:
                         if bpy.context.scene.vloutputs_props.outputs_alpha_solo == True or bpy.context.scene.vloutputs_props.outputs_alpha_solo == False and output != "Alpha":
                             compo_tree.links.new(compo_tree.nodes[render_node_name].outputs[output_slot],compo_tree.nodes[output_node_name].inputs[input_slot])
@@ -704,25 +712,27 @@ def create_outputsNodes(selected_scene, selected_scene_layer_list, output_enable
                     #vloutput_path = vloutput_path[del_x_signs:]
                     # change the name
                     if bpy.context.scene.vloutputs_props.outputs_alpha_solo == False and input_slot != "Alpha":
-                        compo_tree.nodes[output_node_name].file_slots[iter].path = vloutput_path
+                        compo_tree.nodes[output_node_name].file_output_items[iter].name = vloutput_path
                         iter += 1
                     elif input_slot == "Alpha":
                         iter += 1
 
             # update base path (from scene output)
-            base_path = compo_tree.nodes[output_node_name].base_path
+            base_path = compo_tree.nodes[output_node_name].directory
             #print(f"{base_path=}")
             if change_only_node_output == False:
                 for string in outputs_output_corresponding_dict.keys():
                     if string in base_path :
-                        compo_tree.nodes[output_node_name].base_path = base_path.replace(string,outputs_output_corresponding_dict.get(string))
+                        compo_tree.nodes[output_node_name].directory = base_path.replace(string,outputs_output_corresponding_dict.get(string))
 
 
             # clean unused output
             if clear_unusedSockets:
-                for input in compo_tree.nodes[output_node_name].inputs:
-                    if len(input.links) == 0:
-                        compo_tree.nodes[output_node_name].inputs.remove(input)
+                output_node = compo_tree.nodes[output_node_name]
+                # input sockets are generated from file_output_items, one per item in the same order
+                for index in reversed(range(len(output_node.file_output_items))):
+                    if len(output_node.inputs[index].links) == 0:
+                        output_node.file_output_items.remove(output_node.file_output_items[index])
             
                 #{outputs_prefix}
 
@@ -760,10 +770,9 @@ class VLOUTPUT_OT_createnodesoutput(bpy.types.Operator):
         #print(f"{scenes_list=}")
         # process
         for scene in scenes_list:
-            scene.use_nodes = True
             if PRECOMP_SCENE_SUFFIXE not in bpy.context.scene.name:
                 if scene.vloutputs_props.outputs_reset_selection == "RESET ALL TREE":
-                    scene.node_tree.nodes.clear()
+                    get_compositing_tree(scene).nodes.clear()
                 # list all render layers
                 selected_scene_layer_list = list_renderlayers(work_scene, sort_option)
                 # create render layers
@@ -831,7 +840,7 @@ class VLOUTPUT_OT_add_character_enum(bpy.types.Operator):
 class VLOUTPUT_OT_createprecomp(bpy.types.Operator):
     bl_idname = "vloutputs.createprecomp"
     bl_label = ADDON_NAME + "Create Pre-Comp Tree scene"
-    bl_description = "create a pre compositing scene from render layer in scenes. \n /!\ You need to have render once at least one frame per layer to make it works ! /!\ "
+    bl_description = "create a pre compositing scene from render layer in scenes. \n /!\\ You need to have render once at least one frame per layer to make it works ! /!\\ "
     bl_options = {"REGISTER", "UNDO"}
 
     def execute(self, context):
@@ -860,8 +869,7 @@ class VLOUTPUT_OT_createprecomp(bpy.types.Operator):
         # process
         for scene in scenes_list:
             scene_name = scene.name
-            bpy.data.scenes[scene_name].use_nodes = True
-            node_tree = bpy.data.scenes[scene_name].node_tree
+            node_tree = get_compositing_tree(bpy.data.scenes[scene_name])
             # if len(node_tree.nodes)==2 : # in case of it's a new node tree, renderlayer + composite node are in
             #     node_tree.nodes.clear()
             # if bpy.context.scene.vloutputs_props.outputs_reset_selection == "RESET ALL TREE":
@@ -941,14 +949,17 @@ class VLOUTPUT_OT_createprecomp(bpy.types.Operator):
                 iter+=1
             #print(f"alpha nodes created : {node_alphaOver_list}")
             
-            # create final composite node
-            if "Composite" in node_tree.nodes.keys():
-                    node_tree.nodes.remove(node_tree.nodes["Composite"])
+            # create final group output node (Composite node was removed in Blender 5.0)
+            if "Group Output" in node_tree.nodes.keys():
+                    node_tree.nodes.remove(node_tree.nodes["Group Output"])
             if "Viewer" in node_tree.nodes.keys():
                 node_tree.nodes.remove(node_tree.nodes["Viewer"])
-            
+
             if len(renderLayer_nodes_list)>0: # check lengh of list to avoid errors
-                node_composite = node_tree.nodes.new(type="CompositorNodeComposite").name
+                # the group output node needs an Image socket on the node group interface
+                if not any(item.item_type == 'SOCKET' and item.in_out == 'OUTPUT' for item in node_tree.interface.items_tree):
+                    node_tree.interface.new_socket(name='Image', in_out='OUTPUT', socket_type='NodeSocketColor')
+                node_composite = node_tree.nodes.new(type="NodeGroupOutput").name
                 node_composite_named = f"{node_composite}{name_suffix}"
                 node_tree.nodes[node_composite].name = node_composite_named
                 node_tree.nodes[node_composite_named].location = (location_x, 100)
@@ -964,7 +975,7 @@ class VLOUTPUT_OT_createprecomp(bpy.types.Operator):
         # clean useless nodes
         for node in node_tree.nodes:
             input_used = 0
-            if node.type == "ALPHAOVER" or node.type == "COMPOSITE" or node.type == "VIEWER":
+            if node.type == "ALPHAOVER" or node.type == "GROUP_OUTPUT" or node.type == "VIEWER":
                 for node_input in  node.inputs:
                     if node_input.is_linked == True:
                         input_used += 1
