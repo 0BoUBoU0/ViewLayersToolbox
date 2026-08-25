@@ -9,7 +9,7 @@ bl_info = {
     "warning": "",
     "category": "View Layers",
     "blender": (5, 0, 0),
-    "version": (2, 0, 0),
+    "version": (2, 0, 1),
 }
 
 # get addon name and version to use them automaticaly in the addon
@@ -25,6 +25,8 @@ from random import uniform
 STRIP_NAME = 'STRIP'
 SEPARATOR = "-" * 20
 PRECOMP_SCENE_SUFFIXE = "_Pre-Compositing"
+# keep a margin under the ~260 characters windows MAX_PATH limit (frame number + extension are appended)
+MAX_PATH_LENGTH = 250
 
 def get_base_path(scene):
     # remove main output namefile to keep only filepath : 
@@ -152,8 +154,8 @@ class VLOUTPUT_PT_filesoutput(bpy.types.Panel):
         ## update box
         uptbox = layout.box()
         split = uptbox.split(factor=.85, align = True)
-        if vloutputs_props.pathlength>=64:
-            text = "Cannot update (subpath too long)"
+        if vloutputs_props.pathlength >= MAX_PATH_LENGTH:
+            text = "Update Layers outputs (last path was too long !)"
             icon = f"{STRIP_NAME}_COLOR_01"
         else:
             text = "Update Layers outputs"
@@ -200,13 +202,13 @@ class VLOUTPUT_PT_filesoutput(bpy.types.Panel):
         if vloutputs_props.path_to_change == "Subpath": 
             split.operator('vloutputs.dellastcharacter', text="", icon="TRIA_LEFT_BAR")
         row = subbox.row()
-        if vloutputs_props.pathlength >= 64:
-            str_check = "too long !!"
+        if vloutputs_props.pathlength >= MAX_PATH_LENGTH:
+            str_check = "too long for windows !!"
             icon = f"{STRIP_NAME}_COLOR_01"
         else:
             str_check = "ok"
             icon = f"{STRIP_NAME}_COLOR_04"
-        row.label(icon=icon, text=f"length : {vloutputs_props.pathlength} on 64 ( {str_check} )")
+        row.label(icon=icon, text=f"last complete path length : {vloutputs_props.pathlength} on {MAX_PATH_LENGTH} ( {str_check} )")
 
         ## fields options
         box = layout.box()
@@ -568,7 +570,6 @@ def nodes_paths(layername, outputname, outputpath, del_signs):
         complete_filepath = clean_filepath[del_x_signs:]
     else:
         complete_filepath = clean_filepath
-    scene.vloutputs_props.pathlength = len(complete_filepath)
     return complete_filepath
 
 def create_outputsNodes(selected_scene, selected_scene_layer_list, output_enabled_dict):
@@ -618,16 +619,17 @@ def create_outputsNodes(selected_scene, selected_scene_layer_list, output_enable
         file_format = selected_scene.render.image_settings.file_format
 
     ## create outputs nodes
-    iter_node = 0
-    for layer in selected_scene_layer_list: 
+    max_pathlength = 0
+    for layer in selected_scene_layer_list:
         # variables
         render_node_name = f"Render Layers - {layer.name}"
         output_node_name = f"File Output - {layer.name}"
 
         # update base_path
         layer_basepath = main_file_output + nodes_paths(layer.name,"",bpy.context.scene.vloutputs_props.basepath_previs,False)
-        
-        if bpy.context.scene.vloutputs_props.pathlength <= 64:
+        max_pathlength = max(max_pathlength, len(layer_basepath))
+
+        if len(layer_basepath) <= MAX_PATH_LENGTH:
             # create output nodes if needed
             if outputs_reset_selection != "ONLY UPDATE PATHS":
                 # check if file output node exists
@@ -689,12 +691,13 @@ def create_outputsNodes(selected_scene, selected_scene_layer_list, output_enable
                     #         vloutput_path = vloutput_path.replace(string,outputs_output_corresponding_dict.get(string))
                     #vloutput_path = vloutput_path[del_x_signs:]
                     input_slot = vloutput_path
-                    #print(f"{input_slot=}")
-                    #print(f"{output_slot=}")
+                    max_pathlength = max(max_pathlength, len(layer_basepath) + len(vloutput_path))
                     compo_tree.nodes[output_node_name].file_output_items.new('RGBA', input_slot)
-                    if bpy.context.scene.vloutputs_props.pathlength<=64:
+                    # link by index : socket names are truncated to 63 characters, a name lookup fails on longer paths
+                    item_index = len(compo_tree.nodes[output_node_name].file_output_items) - 1
+                    if len(layer_basepath) + len(vloutput_path) <= MAX_PATH_LENGTH:
                         if bpy.context.scene.vloutputs_props.outputs_alpha_solo == True or bpy.context.scene.vloutputs_props.outputs_alpha_solo == False and output != "Alpha":
-                            compo_tree.links.new(compo_tree.nodes[render_node_name].outputs[output_slot],compo_tree.nodes[output_node_name].inputs[input_slot])
+                            compo_tree.links.new(compo_tree.nodes[render_node_name].outputs[output_slot],compo_tree.nodes[output_node_name].inputs[item_index])
             
             # update outputs slots names
             if outputs_reset_selection=="ONLY UPDATE PATHS":
@@ -705,11 +708,7 @@ def create_outputsNodes(selected_scene, selected_scene_layer_list, output_enable
                     #     input_slot = outputs_output_corresponding_dict[input_slot]
                     # create the outputs paths regarding user fields
                     vloutput_path = nodes_paths(layer.name,input_slot,bpy.context.scene.vloutputs_props.subpath_previs,True)
-                    # check if user wants to change the string
-                    # for string in outputs_output_corresponding_dict.keys():
-                    #     if string in vloutput_path :
-                    #         vloutput_path = vloutput_path.replace(string,outputs_output_corresponding_dict.get(string))
-                    #vloutput_path = vloutput_path[del_x_signs:]
+                    max_pathlength = max(max_pathlength, len(layer_basepath) + len(vloutput_path))
                     # change the name
                     if bpy.context.scene.vloutputs_props.outputs_alpha_solo == False and input_slot != "Alpha":
                         compo_tree.nodes[output_node_name].file_output_items[iter].name = vloutput_path
@@ -733,8 +732,10 @@ def create_outputsNodes(selected_scene, selected_scene_layer_list, output_enable
                 for index in reversed(range(len(output_node.file_output_items))):
                     if len(output_node.inputs[index].links) == 0:
                         output_node.file_output_items.remove(output_node.file_output_items[index])
-            
-                #{outputs_prefix}
+        else:
+            print(f"{ADDON_NAME}: skipped layer '{layer.name}', output path too long ({len(layer_basepath)} on {MAX_PATH_LENGTH})")
+
+    bpy.context.scene.vloutputs_props.pathlength = max_pathlength
 
 
 # region create operators
@@ -779,7 +780,8 @@ class VLOUTPUT_OT_createnodesoutput(bpy.types.Operator):
                 output_enabled_dict = create_renderlayers_nodes(work_scene, selected_scene_layer_list)
                 # create output nodes
                 create_outputsNodes(work_scene, selected_scene_layer_list, output_enabled_dict)
-                bpy.context.window.scene = work_scene # switch back to user scene work
+                if bpy.context.window: # no window in background mode
+                    bpy.context.window.scene = work_scene # switch back to user scene work
                 #print(" --- scene finished --- ")
 
             # use a user script if wanted
@@ -986,8 +988,8 @@ class VLOUTPUT_OT_createprecomp(bpy.types.Operator):
         if bpy.context.scene.vloutputs_props.precomp_postscript_checkbox:
             exec(bpy.context.scene.vloutputs_props.precomp_postscript.as_string())
 
-        #print(iter_node)
-        bpy.context.window.scene = work_scene
+        if bpy.context.window: # no window in background mode
+            bpy.context.window.scene = work_scene
         
         #print(f"{ADDON_NAME} done on : {nodes_created_list} \n")
         print(f"\n {SEPARATOR} {ADDON_NAME} Finished {SEPARATOR} \n")
